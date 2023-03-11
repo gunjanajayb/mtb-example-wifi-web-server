@@ -61,7 +61,7 @@
 #include "cycfg_qspi_memslot.h"
 #endif
 
-
+#include "flowmeter.h"
 /*******************************************************************************
 * Macros
 ******************************************************************************/
@@ -69,6 +69,9 @@
 #define SERVER_TASK_STACK_SIZE        (10 * 1024)
 #define SERVER_TASK_PRIORITY          (1)
 
+/* RTOS related macros. */
+#define HTTP_CLIENT_TASK_STACK_SIZE        (5 * 1024)
+#define HTTP_CLIENT_TASK_PRIORITY          (1)
 /*******************************************************************************
 * Global Variables
 ********************************************************************************/

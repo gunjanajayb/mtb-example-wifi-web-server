@@ -185,6 +185,8 @@ void display_configuration(void);
 cy_rslt_t configure_http_server(void);
 cy_rslt_t reconfigure_http_server(void);
 
+void http_client_task(void *arg);
+
 #endif /* WEB_SERVER_DEMO_H_ */
 
 /* [] END OF FILE */

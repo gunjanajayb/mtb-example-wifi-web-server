@@ -71,6 +71,15 @@
 #include "cy_http_server.h"
 #include "html_web_page.h"
 #include "web_server.h"
+/* TCP client task header file. */
+#include "flowmeter.h"
+
+/* RTOS related macros. */
+#define HTTP_CLIENT_TASK_STACK_SIZE        (5 * 1024)
+#define HTTP_CLIENT_TASK_PRIORITY          (1)
+
+/* flowmeter_handle task handle. */
+TaskHandle_t flowmeter_handle;
 
 /*******************************************************************************
 * Global Variables
@@ -539,6 +548,13 @@ cy_rslt_t wifi_extract_credentials(const uint8_t *data, uint32_t data_len, cy_ht
     }
 
     result = start_sta_mode();
+
+    printf("============================================================\n");
+         	printf("ModusToolbox-Level3-WiFi - 4B: POST to httpbin.org\n");
+        	printf("============================================================\n\n");
+
+    xTaskCreate(flowmeter_logger, "flowlogger_task", HTTP_CLIENT_TASK_STACK_SIZE, NULL, HTTP_CLIENT_TASK_PRIORITY, &flowmeter_handle);
+
     if (CY_RSLT_SUCCESS != result)
     {
         sprintf(response, WIFI_CONNECT_RESPONSE_START);
@@ -664,6 +680,8 @@ cy_rslt_t start_sta_mode()
         if (result == CY_RSLT_SUCCESS)
         {
             APP_INFO(("Successfully connected to Wi-Fi network '%s'.\n", connect_param.ap_credentials.SSID));
+            APP_INFO(("%d.%d.%d.%d\n",(uint8_t)ip_address.ip.v4,(uint8_t)(ip_address.ip.v4 >> 8),(uint8_t)(ip_address.ip.v4 >> 16),(uint8_t)(ip_address.ip.v4 >> 24)));
+            
             break;
         }
         ERR_INFO(("Connection to Wi-Fi network failed with error code %d. Retrying in %d ms...\n", (int)result, WIFI_CONN_RETRY_INTERVAL_MSEC));
@@ -784,6 +802,7 @@ cy_rslt_t reconfigure_http_server(void)
 
     /* IP address of SoftAp. */
     result = cy_wcm_get_ip_addr(CY_WCM_INTERFACE_TYPE_STA, &ip_addr);
+    APP_INFO(("ABC %d.%d.%d.%d\n",(uint8_t)ip_addr.ip.v4,(uint8_t)(ip_addr.ip.v4 >> 8),(uint8_t)(ip_addr.ip.v4 >> 16),(uint8_t)(ip_addr.ip.v4 >> 24)));
     PRINT_AND_ASSERT(result, "cy_wcm_get_ip_addr failed for creating HTTP server...! \n");
 
     http_server_ip_address.ip_address.ip.v4 = ip_addr.ip.v4;
