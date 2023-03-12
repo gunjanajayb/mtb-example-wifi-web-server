@@ -84,6 +84,8 @@ bool connected;
 float flowrate = 0.03;
 uint32_t newflowrate;
 uint32_t bodyLength;
+volatile int counterpulse_curr = 0;
+volatile int counterpulse_diff = 0;
 
 /*******************************************************************************
  * Function Name: http_client_task
@@ -284,10 +286,10 @@ void flowmeter_logger(void *arg){
 	cy_http_client_t handle;
 	cy_awsport_server_info_t server_info;
 	cy_rslt_t res = CY_RSLT_SUCCESS;
-	uint32_t adc_out=0;
+	float adc_out=0;
 	uint32_t bodyLength=0;
-	uint32_t newflowrate=0;
-	uint32_t flowrate=0;
+	float newflowrate=0;
+	float flowrate=0;
 
 	init_adc(&adc_chan_0_obj);
 
@@ -297,20 +299,18 @@ void flowmeter_logger(void *arg){
 		// Poll the flowmeter once a second
 		vTaskDelay(pdMS_TO_TICKS(10000));
 
-		/* Read the ADC conversion result for corresponding ADC channel in millivolts. */
-		adc_out = cyhal_adc_read_uv(&adc_chan_0_obj) / 1000;
-				adc_out=(float)cyhal_adc_read_uv(&adc_chan_0_obj)*3.3/4095;//analog flow value
+		adc_out = counterpulse_diff / 7.5;
 		
 		newflowrate =  adc_out;
 		
-		//gdb if(newflowrate != flowrate){
+		if(newflowrate != flowrate)
 		{
 			flowrate= newflowrate;
 			// Create the json representing the flowmweter
-			sprintf(eventValue, "{\"FLOWRATE\":\"flowrate\",\"value\":\"%ld\"}", flowrate);
+			sprintf(eventValue, "{\"FLOWRATE\":\"flowrate\",\"value\":\"%f\"}", flowrate);
 
 #ifdef FYI_ENABLE			
-			printf("sending flowrate: %ld.\n", flowrate);
+			printf("sending flowrate: %f.\n", flowrate);
 #endif			
 			bodyLength = strlen(eventValue);
 
@@ -418,5 +418,24 @@ cy_rslt_t connect_to_wifi_ap(void)
 void disconnect_callback(void *arg){
     printf("Disconnected from HTTP Server\n");
     connected = false;
+}
+
+void flowsensor_task(void *arg)
+{
+	int counterpulse_prev = 0;
+	for(;;)
+	{
+		//check the pulse every second
+		vTaskDelay(pdMS_TO_TICKS(1000));
+		counterpulse_diff = counterpulse_curr - counterpulse_prev;
+		counterpulse_prev = counterpulse_curr;
+
+		printf("pulses %d\n",counterpulse_diff);
+	}
+}
+
+void gpio_interrupt_handler(void *handler_arg, cyhal_gpio_event_t event)
+{
+	counterpulse_curr++;
 }
 

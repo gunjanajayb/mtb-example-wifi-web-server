@@ -69,11 +69,13 @@
                                           (((uint32_t) c) << 16) | \
                                           (((uint32_t) b) << 8) |\
                                           ((uint32_t) a))
-
+#define GPIO_INTERRUPT_PRIORITY (7u)
 /*******************************************************************************
 * Function Prototype
 ********************************************************************************/
 void flowmeter_logger(void *arg);
+void flowsensor_task(void *arg);
+void gpio_interrupt_handler(void *handler_arg, cyhal_gpio_event_t event);
 
 
 #endif /* FLOWMETER_H_ */

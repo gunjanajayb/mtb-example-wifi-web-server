@@ -72,6 +72,11 @@
 /* RTOS related macros. */
 #define HTTP_CLIENT_TASK_STACK_SIZE        (5 * 1024)
 #define HTTP_CLIENT_TASK_PRIORITY          (1)
+
+/* RTOS related macros. */
+#define FLOWSENSE_TASK_STACK_SIZE        (5 * 1024)
+#define FLOWSENSE_TASK_PRIORITY          (1)
+
 /*******************************************************************************
 * Global Variables
 ********************************************************************************/
@@ -80,7 +85,8 @@ volatile int uxTopUsedPriority;
 
 /* SOFTAP server task handle. */
 TaskHandle_t server_task_handle;
-
+TaskHandle_t flowsens_task_handle;
+cyhal_gpio_callback_data_t gpio_btn_callback_data;
 /*******************************************************************************
  * Function Name: main
  *******************************************************************************
@@ -107,6 +113,19 @@ int main(void)
     /* Initialize the Board Support Package (BSP) */
     result = cybsp_init();
     CHECK_RESULT(result);
+
+	/* Initialize the user button */
+	result = cyhal_gpio_init(P13_5, CYHAL_GPIO_DIR_INPUT,
+					CYBSP_USER_BTN_DRIVE, CYBSP_BTN_PRESSED);
+	/* User button init failed. Stop program execution */
+	CHECK_RESULT(result);
+
+	/* Configure GPIO interrupt */
+	gpio_btn_callback_data.callback = gpio_interrupt_handler;
+	cyhal_gpio_register_callback(P13_5,
+								 &gpio_btn_callback_data);
+	cyhal_gpio_enable_event(P13_5, CYHAL_GPIO_IRQ_RISE,
+								 GPIO_INTERRUPT_PRIORITY, true);
 
     /* Enable global interrupts */
     __enable_irq();
@@ -135,6 +154,10 @@ int main(void)
     /* Starts the SoftAP and then HTTP server . */
     xTaskCreate(server_task, "HTTP Web Server", SERVER_TASK_STACK_SIZE, NULL,
                 SERVER_TASK_PRIORITY, &server_task_handle);
+
+    xTaskCreate(flowsensor_task, "flow sensor task", FLOWSENSE_TASK_STACK_SIZE, NULL,
+                FLOWSENSE_TASK_PRIORITY, &flowsens_task_handle);
+
 
     /* Start the FreeRTOS scheduler */
     vTaskStartScheduler();
