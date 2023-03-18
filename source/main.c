@@ -116,7 +116,7 @@ int main(void)
 
 	/* Initialize the user button */
 	result = cyhal_gpio_init(P13_5, CYHAL_GPIO_DIR_INPUT,
-					CYBSP_USER_BTN_DRIVE, CYBSP_BTN_PRESSED);
+			CYHAL_GPIO_DRIVE_OPENDRAINDRIVESHIGH, CYBSP_BTN_PRESSED);
 	/* User button init failed. Stop program execution */
 	CHECK_RESULT(result);
 

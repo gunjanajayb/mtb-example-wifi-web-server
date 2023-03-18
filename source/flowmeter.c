@@ -429,8 +429,9 @@ void flowsensor_task(void *arg)
 		vTaskDelay(pdMS_TO_TICKS(1000));
 		counterpulse_diff = counterpulse_curr - counterpulse_prev;
 		counterpulse_prev = counterpulse_curr;
-
-		printf("pulses %d\n",counterpulse_diff);
+#ifdef FYI_ENABLE
+		printf("pulses %d %d\n",counterpulse_diff,counterpulse_curr);
+#endif		
 	}
 }
 
