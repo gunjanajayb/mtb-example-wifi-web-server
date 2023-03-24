@@ -150,7 +150,7 @@ static cy_rslt_t log_flowrate(cy_http_client_t handle, char* str_flowrate, uint3
 {
 	uint8_t userBuffer[ USER_BUFFER_LENGTH ];
 	cy_http_client_request_header_t request;
-	cy_http_client_header_t header[1];	
+	cy_http_client_header_t header[2];
 	cy_rslt_t res = CY_RSLT_SUCCESS;
 	uint32_t num_header;
 	cy_http_client_response_t response;
@@ -182,7 +182,11 @@ static cy_rslt_t log_flowrate(cy_http_client_t handle, char* str_flowrate, uint3
 	header[0].field_len = strlen("Connection");
 	header[0].value = "keep-alive";
 	header[0].value_len = strlen("keep-alive");
-	num_header = 1;
+	header[1].field = "Content-Type";
+	header[1].field_len = strlen("Content-Type");
+	header[1].value = "application/x-www-form-urlencoded";
+	header[1].value_len = strlen("application/x-www-form-urlencoded");
+	num_header = 2;
 	/* Generate the standard header and user-defined header, and update in the request structure. */
 	res = cy_http_client_write_header(handle, &request, &header[0], num_header);
 	if( res != CY_RSLT_SUCCESS )
@@ -193,7 +197,7 @@ static cy_rslt_t log_flowrate(cy_http_client_t handle, char* str_flowrate, uint3
 		return res;
 	}
 	/* Send the HTTP request and body to the server, and receive the response from it. */
-	res = cy_http_client_send(handle, &request, (uint8_t *)REQUEST_BODY, REQUEST_BODY_LENGTH, &response);
+	res = cy_http_client_send(handle, &request, (uint8_t *)str_flowrate, length, &response);
 	if( res != CY_RSLT_SUCCESS )
 	{
 #ifdef FYI_ENABLE		
@@ -213,7 +217,9 @@ static cy_rslt_t log_flowrate(cy_http_client_t handle, char* str_flowrate, uint3
 	( void ) memset( &header[0], 0, sizeof( header[0] ) );
 	header[0].field = "Connection";
 	header[0].field_len = strlen("Connection");
-	num_header = 1;
+	header[1].field = "Content-Type";
+	header[1].field_len = strlen("Content-Type");
+	num_header = 2;
 	/* Read the header value from the HTTP response. */
 	res = cy_http_client_read_header(handle, &response, &header[0], num_header);
 	if( res != CY_RSLT_SUCCESS )
@@ -307,7 +313,8 @@ void flowmeter_logger(void *arg){
 		{
 			flowrate= newflowrate;
 			// Create the json representing the flowmweter
-			sprintf(eventValue, "{\"FLOWRATE\":\"flowrate\",\"value\":\"%f\"}", flowrate);
+
+			sprintf(eventValue, "FLOWRATE=%f&ID=888&STATUS=OFF", flowrate);
 
 #ifdef FYI_ENABLE			
 			printf("sending flowrate: %f.\n", flowrate);
@@ -429,9 +436,7 @@ void flowsensor_task(void *arg)
 		vTaskDelay(pdMS_TO_TICKS(1000));
 		counterpulse_diff = counterpulse_curr - counterpulse_prev;
 		counterpulse_prev = counterpulse_curr;
-#ifdef FYI_ENABLE
-		printf("pulses %d %d\n",counterpulse_diff,counterpulse_curr);
-#endif		
+		
 	}
 }
 
