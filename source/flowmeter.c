@@ -62,6 +62,8 @@
 /* HTTP Client Library*/
 #include "cy_http_client_api.h"
 
+#include "alarm.h"
+
 /*******************************************************************************
 * Macros
 ********************************************************************************/
@@ -81,7 +83,6 @@ void disconnect_callback(void *arg);
 * Global Variables
 ********************************************************************************/
 bool connected;
-float flowrate = 0.03;
 uint32_t newflowrate;
 uint32_t bodyLength;
 volatile int counterpulse_curr = 0;
@@ -106,7 +107,7 @@ volatile int counterpulse_diff = 0;
 #define TRANSPORT_SEND_RECV_TIMEOUT_MS    ( 5000 )
 #define GET_PATH                        "/tdsApi/readts.php"
 #define USER_BUFFER_LENGTH                ( 2048 )
-#define REQUEST_BODY                    "{\"status\": \"ON\",\"device\": \"123\"}"
+#define REQUEST_BODY                    "{\"status\":\"ON\",\"device\":\"123\"}"
 #define REQUEST_BODY_LENGTH        ( sizeof( REQUEST_BODY ) - 1 )
 
 static cy_rslt_t http_client_create(cy_http_client_t* handle,cy_awsport_server_info_t* server_info)
@@ -296,25 +297,37 @@ void flowmeter_logger(void *arg){
 	uint32_t bodyLength=0;
 	float newflowrate=0;
 	float flowrate=0;
+	char device_id[10] = {0};
+	char stat[2][4] = {"OFF","ON"};
+	bool gpiostate = 0;
+	int counterpulse_prev = 0;
 
-	init_adc(&adc_chan_0_obj);
+#if 1 	//write to EEPROM
+	char devIDtoBeWritten[10] = {"00400214"};
+	write_ID(devIDtoBeWritten,8);
+#endif
+
+	read_ID(&device_id[0],8);
 
 	while(1)
 	{
 		res = CY_RSLT_SUCCESS;
 		// Poll the flowmeter once a second
-		vTaskDelay(pdMS_TO_TICKS(10000));
+		cyhal_system_delay_ms(60000);
 
-		adc_out = counterpulse_diff / 7.5;
+		adc_out = (float)(counterpulse_curr)/ (float)7.5 ;
+		counterpulse_curr = 0;
 		
 		newflowrate =  adc_out;
 		
-		if(newflowrate != flowrate)
+		if(newflowrate)
 		{
-			flowrate= newflowrate;
-			// Create the json representing the flowmweter
+			flowrate = flowrate + newflowrate;
 
-			sprintf(eventValue, "FLOWRATE=%f&ID=888&STATUS=OFF", flowrate);
+			gpiostate = cyhal_gpio_read(CYBSP_USER_LED);
+
+			//gdb sprintf(eventValue, "FLOWRATE=%f&ID=%s&STATUS=%s", flowrate,device_id,stat[gpiostate]);
+			sprintf(eventValue, "action=UPDATE_FLOW&ID=%s&FLOW=%f", device_id,flowrate);
 
 #ifdef FYI_ENABLE			
 			printf("sending flowrate: %f.\n", flowrate);
@@ -342,7 +355,7 @@ void flowmeter_logger(void *arg){
 #ifdef FYI_ENABLE								
 				printf("delete_http_client failed %d\n",res);
 #endif								
-			}			
+			}
 		}
 	}
 
@@ -436,7 +449,6 @@ void flowsensor_task(void *arg)
 		vTaskDelay(pdMS_TO_TICKS(1000));
 		counterpulse_diff = counterpulse_curr - counterpulse_prev;
 		counterpulse_prev = counterpulse_curr;
-		
 	}
 }
 

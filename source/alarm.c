@@ -90,7 +90,6 @@ int LOGICAL_EEPROM_SIZE=250;
 /*******************************************************************************
  * Function Prototypes
  ******************************************************************************/
-void HandleError(uint32_t status, char *message);
 
 
 /*******************************************************************************
@@ -215,6 +214,10 @@ const uint8_t EepromStorage[CY_EM_EEPROM_GET_PHYSICAL_SIZE(EEPROM_SIZE, SIMPLE_M
 /* Checks whether the year passed through the parameter is leap or not */
 #define IS_LEAP_YEAR(year) (((0U == (year % 4UL)) && (0U != (year % 100UL))) || (0U == (year % 400UL)))
 
+/* RTOS related macros. */
+#define RTC_TASK_STACK_SIZE        (4 * 1024)
+#define RTC_TASK_PRIORITY          (1)
+
 /*******************************************************************************
 * Function Prototypes
 *******************************************************************************/
@@ -236,7 +239,7 @@ static bool validate_date_time(int sec, int min, int hour, int mday, int month, 
 
 cyhal_rtc_t rtc_obj;
 uint32_t dst_data_flag = 0;
-
+TaskHandle_t rtctask_handle;
 /*******************************************************************************
 * Function Name: handle_error
 ********************************************************************************
@@ -283,23 +286,108 @@ void handle_error(void)
 #define TRANSPORT_SEND_RECV_TIMEOUT_MS    ( 5000 )
 #define GET_PATH                          "/tdsApi/readts.php"
 #define USER_BUFFER_LENGTH                ( 2048 )
-#define REQUEST_BODY                    "{\"status\": \"ON\",\"device\": \"400214\"}"
-#define REQUEST_BODY_LENGTH        ( sizeof( REQUEST_BODY ) - 1 )
-
-
+#define REQUEST_BODY_ALL                    "action=GET_ALL&ID=400214"
+#define REQUEST_BODY_ALL_LENGTH        ( sizeof( REQUEST_BODY_ALL_LENGTH ) - 1 )
+#define TRUE true
+#define FALSE false
 /////////////////////////////////////   HTTP Client End /////////////////////////////////////////////////
 
 char save_response[250];
 char save_memory[250];
-int year = 0;
-int month = 0;
-int day = 0;
-int hour = 0;
-int minute = 0;
-int sec = 0;
-int current_mday=0, current_month=0, current_year=0, current_sec=0, current_min=0, current_hour=0;
+int year = 0, month = 0, day = 0, hour = 0, minute = 0, sec = 0;
+int current_day=0, current_month=0, current_year=0, current_sec=0, current_min=0, current_hour=0;
+uint8_t control_status = 0;
 
-bool date_flag = false;
+bool updateEEPROM_flag = FALSE;
+bool updateRTC_flag = FALSE;
+bool control_flag = FALSE;
+bool booting = TRUE;
+bool update_inprog = FALSE;
+bool alarm_hit = FALSE;
+
+static void getyear(char *value,int *year)
+{
+	int i = 0;
+	int sum = 0;
+	int k = 0;
+
+	for(i = 0; i < 4;i++)
+	{
+		k = value[i] - 0x30;
+		sum = (sum * 10) + k;
+	}
+	*year = sum;
+}
+
+static void getmonth(char *value, int *month)
+{
+	int i = 0;
+	int sum = 0;
+	int k = 0;
+
+	for(i = 5; i < 7;i++)
+	{
+		k = value[i] - 0x30;
+		sum = (sum * 10) + k;
+	}
+	*month = sum;
+}
+
+static void getday(char *value,int *day)
+{
+	int i = 0;
+	int sum = 0;
+	int k = 0;
+
+	for(i = 8; i < 10;i++)
+	{
+		k = value[i] - 0x30;
+		sum = (sum * 10) + k;
+	}
+	*day = sum;
+}
+
+static void gethour(char *value,int *hour)
+{
+	int i = 0;
+	int sum = 0;
+	int k = 0;
+
+	for(i = 11; i < 13;i++)
+	{
+		k = value[i] - 0x30;
+		sum = (sum * 10) + k;
+	}
+	*hour = sum;
+}
+
+static void getminute(char* value,int *minute)
+{
+	int i = 0;
+	int sum = 0;
+	int k = 0;
+
+	for(i = 14; i < 16;i++)
+	{
+		k = value[i] - 0x30;
+		sum = (sum * 10) + k;
+	}
+	*minute = sum;
+}
+
+static void getsecond(char* value,int *second)
+{
+	int i = 0;
+	int sum = 0;
+	int k = 0;
+
+	for(i = 17; i < 19;i++)
+	{
+		k = value[i] - 0x30;
+		sum = (sum * 10) + k;
+	}
+	*second = sum;
+}
 
 static void HandleError(uint32_t status, char *message)
 {
@@ -387,184 +475,139 @@ static bool validate_date_time(int sec, int min, int hour, int mday, int month, 
 
 static cy_rslt_t parse_json_snippet_callback (cy_JSON_object_t* json_object, void *arg )
 {
+	int lyear = 0;
+	int lmonth = 0;
+	int lday = 0;
+	int lhour = 0;
+	int lminute = 0;
+	int lsec = 0;
+	char lcntrl[4] = {0};
+	uint8_t lcntrl_stat = 0;
+
 	switch(json_object->value_type)
 	{
 		case JSON_STRING_TYPE:
 		{
-			printf("Found a string: %.*s\n", json_object->value_length,json_object->value );
-			printf("Found a key: %.*s\n", json_object->object_string_length,json_object->object_string );
-			printf("Found a key: %.*s\n", json_object->parent_object->object_string_length,json_object->parent_object->object_string );
-
-			//extract "year"
-			if((strncmp(json_object->object_string, "year", strlen("year")) == 0))
+#if 0	//gdb
+			printf("Found a string: %.*s\n",json_object->object_string_length,json_object->object_string  );
+			printf("Found a key: %.*s\n", json_object->value_length,json_object->value );
+#endif
+			if((strncmp(json_object->object_string, "DEADLINE", strlen("DEADLINE")) == 0))
 			{
-				int16_t  c = (int16_t )json_object->value_length;
-				int length = (int)c;
+				getyear(json_object->value,&lyear);
+				getmonth(json_object->value,&lmonth);
+				getday(json_object->value,&lday);
+				gethour(json_object->value,&lhour);
+				getminute(json_object->value,&lminute);
+				getsecond(json_object->value,&lsec);
 
-				int sum, digit;
-				sum = 0;
-				for(int i = 0 ; i < length ; i++)
+				if(booting == TRUE)
 				{
-					digit = json_object->value[i] - 0x30;
-					sum = (sum * 10) + digit;
+					year = lyear;month = lmonth;day = lday;hour = lhour;minute = lminute;sec = lsec;
 				}
-				printf("the value is %d",sum);
-				year = sum;
+				else
+				{
+					if(lyear != year || lmonth != month || lday != day || lhour != hour || lminute != minute || lsec != sec)
+					{
+						year = lyear;month = lmonth;day = lday;hour = lhour;minute = lminute;sec = lsec;
+						updateEEPROM_flag = TRUE;
+					}
+				}
+
+				printf("year %d\n",lyear);
+				printf("month %d\n",lmonth);
+				printf("day %d\n",lday);
+				printf("hour %d\n",lhour);
+				printf("minute %d\n",lminute);
+				printf("sec %d\n",lsec);
+				printf("\r\n");
+#if 0	//gdb
+				printf("the value is %s",json_object->value);
+#endif
 			}
 
-			//extract "month"
-			if((strncmp(json_object->object_string, "month", strlen("month")) == 0))
+			if((strncmp(json_object->object_string, "DATE_TIME", strlen("DATE_TIME")) == 0))
 			{
-				int16_t  c = (int16_t )json_object->value_length;
-				int length = (int)c;
-				int sum, digit;
-				sum = 0;
+				getyear(json_object->value,&lyear);
+				getmonth(json_object->value,&lmonth);
+				getday(json_object->value,&lday);
+				gethour(json_object->value,&lhour);
+				getminute(json_object->value,&lminute);
+				getsecond(json_object->value,&lsec);
 
-				for(int i = 0 ; i < length ; i++)
+				if(booting == TRUE)
 				{
-					digit = json_object->value[i] - 0x30;
-					sum = (sum * 10) + digit;
+					current_year = lyear;current_month = lmonth;current_day = lday;current_hour = lhour;current_min = lminute;current_sec = lsec;
 				}
-           		printf("the value is %d",sum);
-				month = sum;
+				else
+				{
+					if(lyear != current_year || lmonth != current_month || lday != current_day || lhour != current_hour || lminute != current_min || lsec != current_sec)
+					{
+						current_year = lyear;current_month = lmonth;current_day = lday;current_hour = lhour;current_min = lminute;current_sec = lsec;
+						updateRTC_flag = TRUE;
+					}
+				}
+
+				printf("current_year %d\n",current_year);
+				printf("current_month %d\n",current_month);
+				printf("current_day %d\n",current_day);
+				printf("current_hour %d\n",current_hour);
+				printf("current_minute %d\n",current_min);
+				printf("current_sec %d\n",current_sec);
+				printf("\r\n");
+#if 0	//gdb
+				printf("the value is %s",json_object->value);
+#endif
 			}
 
-			//extract "day"
-			if((strncmp(json_object->object_string, "day", strlen("day")) == 0))
+			if((strncmp(json_object->object_string, "CONTROL", strlen("CONTROL")) == 0))
 			{
-				int16_t  c = (int16_t )json_object->value_length;
-				int length = (int)c;
-
-				int sum, digit;
-				sum = 0;
-				for(int i = 0 ; i < length ; i++)
+				if(booting == TRUE)
 				{
-					digit = json_object->value[i] - 0x30;
-					sum = (sum * 10) + digit;
+					strncpy(lcntrl,json_object->value,3);
+					if(strncmp (lcntrl, "ON" , strlen("ON")) == 0)
+					{
+						lcntrl_stat = 1;
+					}
+					else if(strncmp (lcntrl, "OFF" , strlen("OFF")) == 0)
+					{
+						lcntrl_stat = 0;
+					}
+					else
+					{
+						lcntrl_stat = 0xFF;
+					}
+#if 0	//gdb
+					printf("CONTROL %s %d %d\n",lcntrl,lcntrl_stat,control_status);
+#endif
+					control_status = lcntrl_stat;
 				}
-	        	printf("the value is %d",sum);
-				day = sum;
-			}
-
-			//extract hour
-			if((strncmp(json_object->object_string, "hour", strlen("hour")) == 0))
-			{
-				int16_t  c = (int16_t )json_object->value_length;
-				int length = (int)c;
-
-				int sum, digit;
-				sum = 0;
-				for(int i = 0 ; i < length ; i++)
+				else
 				{
-					digit = json_object->value[i] - 0x30;
-					sum = (sum * 10) + digit;
+					strncpy(lcntrl,json_object->value,3);
+					if(strncmp (lcntrl, "ON" , strlen("ON")) == 0)
+					{
+						lcntrl_stat = 1;
+					}
+					else if(strncmp (lcntrl, "OFF" , strlen("OFF")) == 0)
+					{
+						lcntrl_stat = 0;
+					}
+					else
+					{
+						lcntrl_stat = 0xFF;
+					}
+#if 0	//gdb
+					printf("CONTROL %s %d %d\n",lcntrl,lcntrl_stat,control_status);
+#endif
+
+					if(control_status != lcntrl_stat)
+					{
+						control_status = lcntrl_stat;
+						control_flag = TRUE;
+					}
 				}
-	     		printf("the value is %d",sum);
-				hour = sum;
 			}
-
-			//extract "minute"
-			if((strncmp(json_object->object_string, "minute", strlen("minute")) == 0))
-			{
-				int16_t  c = (int16_t )json_object->value_length;
-				int length = (int)c;
-
-				int sum, digit;
-				sum = 0;
-				for(int i = 0 ; i < length ; i++)
-				{
-					digit = json_object->value[i] - 0x30;
-					sum = (sum * 10) + digit;
-				}
-	        	printf("the value is %d",sum);
-				minute = sum;
-			}
-
-			//get current year
-			if((strncmp(json_object->object_string, "current_year", strlen("current_year")) == 0))
-			{
-				int16_t  c = (int16_t )json_object->value_length;
-				int length = (int)c;
-
-				int sum, digit;
-				sum = 0;
-				for(int i = 0 ; i < length ; i++)
-				{
-					digit = json_object->value[i] - 0x30;
-					sum = (sum * 10) + digit;
-				}
-           		printf("the value is %d",sum);
-				current_year = sum;
-			}
-
-			//get current monthjj
-			if((strncmp(json_object->object_string, "current_month", strlen("current_month")) == 0))
-			{
-				int16_t  c = (int16_t )json_object->value_length;
-				int length = (int)c;
-
-				int sum, digit;
-				sum = 0;
-				for(int i = 0 ; i < length ; i++)
-				{
-					digit = json_object->value[i] - 0x30;
-					sum = (sum * 10) + digit;
-				}
-				printf("the value is %d",sum);
-				current_month = sum;
-			}
-
-			//get current_day
-			if((strncmp(json_object->object_string, "current_day", strlen("current_day")) == 0))
-			{
-				int16_t  c = (int16_t )json_object->value_length;
-				int length = (int)c;
-
-				int sum, digit;
-				sum = 0;
-				for(int i = 0 ; i < length ; i++)
-				{
-					digit = json_object->value[i] - 0x30;
-					sum = (sum * 10) + digit;
-				}
-           		printf("the value is %d",sum);
-				current_mday = sum;
-			}
-
-			//get current hour
-			if((strncmp(json_object->object_string, "current_hour", strlen("current_hour")) == 0))
-			{
-				int16_t  c = (int16_t )json_object->value_length;
-				int length = (int)c;
-
-				int sum, digit;
-				sum = 0;
-				for(int i = 0 ; i < length ; i++)
-				{
-					digit = json_object->value[i] - 0x30;
-					sum = (sum * 10) + digit;
-				}
-				printf("the value is %d",sum);
-				current_hour = sum;
-			}
-
-			//get current minute
-			if((strncmp(json_object->object_string, "current_minute", strlen("current_minute")) == 0))
-			{
-				int16_t  c = (int16_t )json_object->value_length;
-				int length = (int)c;
-
-				int sum, digit;
-				sum = 0;
-				for(int i = 0 ; i < length ; i++)
-				{
-					digit = json_object->value[i] - 0x30;
-					sum = (sum * 10) + digit;
-				}
-				printf("the value is %d",sum);
-				current_min = sum;
-			}
-
 			break;
 		}
 		case JSON_NUMBER_TYPE:
@@ -589,7 +632,7 @@ static cy_rslt_t parse_json_snippet_callback (cy_JSON_object_t* json_object, voi
 		}
 		case JSON_ARRAY_TYPE:
 		{
-			printf("Found an ARRAY");
+			printf("Found an ARRAY\n");
 			break;
 		}
 		default:
@@ -600,7 +643,7 @@ static cy_rslt_t parse_json_snippet_callback (cy_JSON_object_t* json_object, voi
 	return 0;
 }
 
-int json_parser_snippet(void)
+int json_parser_snippet()
 {
 	cy_JSON_parser_register_callback ( parse_json_snippet_callback, NULL );
 	if (cy_JSON_parser(save_memory , strlen(save_memory)) == CY_RSLT_SUCCESS)
@@ -619,14 +662,6 @@ void init_relay()
 {
     cy_rslt_t result;
 
-    /* Initialize the device and board peripherals */
-    result = cybsp_init();
-    /*BSP init failed. Stop program execution */
-    if (result != CY_RSLT_SUCCESS)
-    {
-        
-    }
-
     /* Initialize the User LED */
     result = cyhal_gpio_init(CYBSP_USER_LED, CYHAL_GPIO_DIR_OUTPUT, CYHAL_GPIO_DRIVE_STRONG, CYBSP_LED_STATE_ON);
     /* GPIO init failed. Stop program execution */
@@ -635,6 +670,32 @@ void init_relay()
 
     }
 }
+
+static void init_RTC(struct tm *date_time)
+{
+	cy_rslt_t rslt;
+	char buffer[STRING_BUFFER_SIZE];
+
+	memset(buffer,0x00,STRING_BUFFER_SIZE);
+
+	/* Initialize RTC */
+    rslt = cyhal_rtc_init(&rtc_obj);
+    if (CY_RSLT_SUCCESS != rslt)
+    {
+        handle_error();
+    }
+
+	rslt = cyhal_rtc_read(&rtc_obj, date_time);
+	if (CY_RSLT_SUCCESS != rslt)
+	{
+		handle_error();
+	}
+
+	printf("RTC init\r\n");
+	strftime(buffer, sizeof(buffer), "%c", date_time);
+	printf("\r%s\n\n", buffer);
+}
+
 
 static cy_rslt_t http_client_create(cy_http_client_t* handle,cy_awsport_server_info_t* server_info)
 {
@@ -694,13 +755,14 @@ static cy_rslt_t delete_http_client(cy_http_client_t handle)
 	return res;
 }
 
-static void get_Alarm_time(cy_http_client_t handle)
+static cy_rslt_t get_Alarm_time(cy_http_client_t handle, char* req_body, int req_len)
 {
 	cy_http_client_request_header_t request;
-	cy_http_client_header_t header[1];
+	cy_http_client_header_t header[2];
 	uint32_t num_header;
 	cy_http_client_response_t response;
 	cy_rslt_t res = CY_RSLT_SUCCESS;	
+	uint8_t userBuffer[ USER_BUFFER_LENGTH ];
     
 	/* Connect the HTTP client to the server. */
 	res = cy_http_client_connect(handle, TRANSPORT_SEND_RECV_TIMEOUT_MS, TRANSPORT_SEND_RECV_TIMEOUT_MS);
@@ -724,7 +786,11 @@ static void get_Alarm_time(cy_http_client_t handle)
 	header[0].field_len = strlen("Connection");
 	header[0].value = "keep-alive";
 	header[0].value_len = strlen("keep-alive");
-	num_header = 1;
+	header[1].field = "Content-Type";
+	header[1].field_len = strlen("Content-Type");
+	header[1].value = "application/x-www-form-urlencoded";
+	header[1].value_len = strlen("application/x-www-form-urlencoded");
+	num_header = 2;
 	/* Generate the standard header and user-defined header, and update in the request structure. */
 	res = cy_http_client_write_header(handle, &request, &header[0], num_header);
 	if( res != CY_RSLT_SUCCESS )
@@ -732,8 +798,9 @@ static void get_Alarm_time(cy_http_client_t handle)
 		printf("HTTP Client Header Write Failed!\n");
 
 	}
+
 	/* Send the HTTP request and body to the server, and receive the response from it. */
-	res = cy_http_client_send(handle, &request, (uint8_t *)REQUEST_BODY, REQUEST_BODY_LENGTH, &response);
+	res = cy_http_client_send(handle, &request, (uint8_t *)req_body, req_len, &response);
 	if( res != CY_RSLT_SUCCESS )
 	{
 		printf("HTTP Client Send Failed!\n");
@@ -742,12 +809,13 @@ static void get_Alarm_time(cy_http_client_t handle)
 
 	printf("\nResponse received from HTTP Client:\n");
 
+#if 0	//gdb
 	for(int i = 0; i < response.body_len; i++)
 	{
 		printf("%c", response.body[i]);
 	}
 	printf("\n");
-
+#endif
 
 	for(int i = 0; i < response.body_len; i++)
 	{
@@ -757,7 +825,9 @@ static void get_Alarm_time(cy_http_client_t handle)
 	( void ) memset( &header[0], 0, sizeof( header[0] ) );
 	header[0].field = "Connection";
 	header[0].field_len = strlen("Connection");
-	num_header = 1;
+	header[1].field = "Content-Type";
+	header[1].field_len = strlen("Content-Type");
+	num_header = 2;
 	/* Read the header value from the HTTP response. */
 	res = cy_http_client_read_header(handle, &response, &header[0], num_header);
 	if( res != CY_RSLT_SUCCESS )
@@ -770,74 +840,292 @@ static void get_Alarm_time(cy_http_client_t handle)
 	{
 		/* Failure path. */
 	}
+
+	return res;
+}
+
+static void updateRTC()
+{
+	cy_rslt_t rslt;
+	char buffer[STRING_BUFFER_SIZE] = {0};
+	struct tm new_time = {0};
+
+	if (validate_date_time(current_sec, current_min, current_hour, current_day, current_month, current_year))
+	{
+		new_time.tm_sec = current_sec;
+		new_time.tm_min = current_min;
+		new_time.tm_hour = current_hour;
+		new_time.tm_mday = current_day;
+		new_time.tm_mon = month;
+		new_time.tm_year = year;
+		//new_time.tm_wday = get_day_of_week(mday, month, year);
+
+		rslt = cyhal_rtc_write(&rtc_obj, &new_time);
+		if (CY_RSLT_SUCCESS == rslt)
+		{
+			printf("\rRTC time updated\r\n\n");
+			strftime(buffer, sizeof(buffer), "%c", &new_time);
+			printf("\r%s\n\n", buffer);
+		}
+		else
+		{
+			handle_error();
+		}
+	}
+	else
+	{
+		printf("\rInvalid values! Please enter the values in specified"
+				" format\r\n");
+	}
+}
+
+static void updateEEPROM()
+{
+	cy_en_em_eeprom_status_t eepromReturnValue;
+	uint8_t eepromReadArray[LOGICAL_EEPROM_SIZE];
+	uint8_t eepromWriteArray[LOGICAL_EEPROM_SIZE];
+	int i =0, j =0;
+
+	memset(eepromReadArray,0x00,LOGICAL_EEPROM_SIZE);
+	memset(eepromWriteArray,0x00,LOGICAL_EEPROM_SIZE);
+
+	printf("EmEEPROM demo \r\n");
+
+	/* Initialize the flash start address in EEPROM configuration structure. */
+#if ((defined(TARGET_CY8CKIT_064B0S2_4343W)||(defined(TARGET_CY8CPROTO_064B0S3))) && (USER_FLASH == FLASH_REGION_TO_USE ))
+	Em_EEPROM_config.userFlashStartAddr = (uint32_t) APP_DEFINED_EM_EEPROM_LOCATION_IN_FLASH;
+#else
+	Em_EEPROM_config.userFlashStartAddr = (uint32_t) EepromStorage;
+#endif
+
+	eepromReturnValue = Cy_Em_EEPROM_Init(&Em_EEPROM_config, &Em_EEPROM_context);
+	HandleError(eepromReturnValue, "Emulated EEPROM Initialization Error \r\n");
+
+	/* Read 15 bytes out of EEPROM memory. */
+	eepromReturnValue = Cy_Em_EEPROM_Read(LOGICAL_EEPROM_START, eepromReadArray,
+											LOGICAL_EEPROM_SIZE, &Em_EEPROM_context);
+	HandleError(eepromReturnValue, "Emulated EEPROM Read failed \r\n");
+
+	printf("prev\r\n");
+	for(i = 0; i < LOGICAL_EEPROM_SIZE ; i++){
+		printf("%c",eepromReadArray[i]);
+	}
+	printf("\r\n");
+
+	read_ID((char*)eepromWriteArray,8);	//read device ID from EEPROM
+
+    for(i = 8, j =0; i < LOGICAL_EEPROM_SIZE; i++, j++){
+    	eepromWriteArray[i] = (uint8_t)save_response[j];
+    }
+
+	/* Write initial data to EEPROM. */
+	eepromReturnValue = Cy_Em_EEPROM_Write(LOGICAL_EEPROM_START,
+											eepromWriteArray,
+											LOGICAL_EEPROM_SIZE,
+											&Em_EEPROM_context);
+	HandleError(eepromReturnValue, "Emulated EEPROM Write failed \r\n");
+
+	//////////////////////////////////////////////////////////////////////////////////////
+
+	/* Read contents of EEPROM after write. */
+	printf("after\r\n");
+	eepromReturnValue = Cy_Em_EEPROM_Read(LOGICAL_EEPROM_START,
+											eepromReadArray, LOGICAL_EEPROM_SIZE,
+											&Em_EEPROM_context);
+	HandleError(eepromReturnValue, "Emulated EEPROM Read failed \r\n" );
+
+	for(i = 0; i < LOGICAL_EEPROM_SIZE ; i++){
+		printf("%c",eepromReadArray[i]);
+	}
+	printf("\r\n");
+
 }
 
 void alarm_task(void *arg){
 
 	cy_rslt_t rslt;
-	char buffer[STRING_BUFFER_SIZE];
-	struct tm date_time;
-
 	cy_awsport_server_info_t server_info;
 	cy_http_client_t handle;	
+	struct tm date_time;
+	char devID[10] = {0};
+	char req_body[256];
 
-	uint8_t eepromReadArray[LOGICAL_EEPROM_SIZE];
-	uint8_t eepromWriteArray[LOGICAL_EEPROM_SIZE];	
+	memset(req_body,0x00,256);
 
     init_relay();
 
-	//create client 
-	res = http_client_create(&handle, &server_info);
-	if(res != CY_RSLT_SUCCESS)
+    memset(save_memory,0x00,LOGICAL_EEPROM_SIZE);	//reset JASON parser array before getting data
+    memset(save_response,0x00,LOGICAL_EEPROM_SIZE);
+
+    cyhal_system_delay_ms(10000);
+
+	//create client
+	rslt = http_client_create(&handle, &server_info);
+	if(rslt != CY_RSLT_SUCCESS)
 	{
-		continue;
+		printf("error http_client_create\r\n");
 	}
 
 	//get time by creating HTTP request
-	res = get_Alarm_time(handle);
-	if(res != CY_RSLT_SUCCESS)
+	read_ID(devID,8);	//read device ID from EEPROM
+	sprintf(req_body,"action=GET_ALL&ID=%s",devID);
+	rslt = get_Alarm_time(handle,req_body,strlen(req_body));
+	if(rslt != CY_RSLT_SUCCESS)
 	{
-		continue;
-	}		
-	   
+		printf("error get_Alarm_time\r\n");
+	}
+
 	//delete http client
-	res = delete_http_client(handle);
-	if(res != CY_RSLT_SUCCESS)
+	rslt = delete_http_client(handle);
+	if(rslt != CY_RSLT_SUCCESS)
 	{
-		continue;
-	}	
+		printf("error delete_http_client\r\n");
+	}
+
+	memcpy(save_memory,save_response,250);		//update save_memory array with response
+
+	json_parser_snippet();
+
+	booting = FALSE;
+
+	updateEEPROM();
+
+	memset(&date_time, 0x00,sizeof(date_time));
+	init_RTC(&date_time);
+
+	updateRTC();
+
+	if(control_status == 1)
+	{
+		cyhal_gpio_write(CYBSP_USER_LED, CYBSP_LED_STATE_OFF);
+		printf("LED OFF\n");
+	}
+	else
+	{
+		cyhal_gpio_write(CYBSP_USER_LED, CYBSP_LED_STATE_ON);
+		printf("LED ON\n");
+	}
+
+	xTaskCreate(rtc_task, "rtc_task", RTC_TASK_STACK_SIZE, NULL, RTC_TASK_PRIORITY, &rtctask_handle);
 
 	for(;;)
 	{
-		/* Initialize RTC */
-	    rslt = cyhal_rtc_init(&rtc_obj);
-	    if (CY_RSLT_SUCCESS != rslt)
-	    {
-	        handle_error();
-	    }
+		cyhal_system_delay_ms(10000);
 
-		/* Display available commands */
-	    printf("Available commands \r\n");
-	    printf("1 : Set new time and date\r\n");
-
-		rslt = cyhal_rtc_read(&rtc_obj, &date_time);
-		if (CY_RSLT_SUCCESS == rslt)
+		memset(save_memory,0x00,LOGICAL_EEPROM_SIZE);	//reset JASON parser array before getting data
+		memset(save_response,0x00,LOGICAL_EEPROM_SIZE);
+		//create client
+		rslt = http_client_create(&handle, &server_info);
+		if(rslt != CY_RSLT_SUCCESS)
 		{
-			handle_error();
+			printf("error http_client_create\r\n");
 		}
 
-		strftime(buffer, sizeof(buffer), "%c", &date_time);
-		printf("\r%s", buffer);
-		memset(buffer, '\0', sizeof(buffer));	
+		//get time by creating HTTP request
+		read_ID(devID,8);	//read device ID from EEPROM
+		sprintf(req_body,"action=GET_ALL&ID=%s",devID);
+		rslt = get_Alarm_time(handle,req_body,strlen(req_body));
+		if(rslt != CY_RSLT_SUCCESS)
+		{
+			printf("error get_Alarm_time\r\n");
+		}
 
-	    for(int i = 0; i < strlen(save_response); i++){
-	    	eepromWriteArray[i] = (uint8_t)save_response[i];
-	    }
+		//delete http client
+		rslt = delete_http_client(handle);
+		if(rslt != CY_RSLT_SUCCESS)
+		{
+			printf("error delete_http_client\r\n");
+		}
 
-		printf("\r\n");
+		update_inprog = TRUE;
 
-		printf("EmEEPROM demo \r\n");
+		memcpy(save_memory,save_response,250);		//update save_memory array with response
 
+		json_parser_snippet();
+
+		if(updateEEPROM_flag == TRUE)
+		{
+			printf("updateEEPROM\n");
+			updateEEPROM_flag = FALSE;
+			updateEEPROM();
+			alarm_hit = FALSE;
+		}
+
+		if(updateRTC_flag == TRUE)
+		{
+			printf("updateRTC\n");
+			updateRTC_flag = FALSE;
+			updateRTC();
+		}
+
+		update_inprog = FALSE;
+
+		if(control_flag == TRUE)
+		{
+			printf("update control\n");
+			control_flag = FALSE;
+			if(control_status == 1)
+			{
+				cyhal_gpio_write(CYBSP_USER_LED, CYBSP_LED_STATE_OFF);
+			}
+			else
+			{
+				cyhal_gpio_write(CYBSP_USER_LED, CYBSP_LED_STATE_ON);
+			}
+		}
+	}
+}
+
+void rtc_task(void *arg)
+{
+	struct tm date_time;
+	for(;;)
+	{
+		//read first RTC
+		if(update_inprog == FALSE)
+		{
+			memset(&date_time, 0x00,sizeof(date_time));
+			init_RTC(&date_time);
+
+			if(alarm_hit == FALSE)
+			{
+				if(((date_time.tm_mon) == month) && (date_time.tm_mday== day )&& (date_time.tm_hour == hour )&& (date_time.tm_min == minute))
+				{
+					printf("\r\n hello\n");
+					alarm_hit = true;
+					control_status = 0;		//0 means off
+					//TODO update to database about current status in "CONTROL Column"
+					cyhal_gpio_write(CYBSP_USER_LED, CYBSP_LED_STATE_ON);
+				}
+			}
+		}
+		cyhal_system_delay_ms(1000);
+	}
+
+}
+
+void read_ID(char* id, uint8_t len)
+{
+	cy_en_em_eeprom_status_t eepromReturnValue;
+	/* Initialize the flash start address in EEPROM configuration structure. */
+#if ((defined(TARGET_CY8CKIT_064B0S2_4343W)||(defined(TARGET_CY8CPROTO_064B0S3))) && (USER_FLASH == FLASH_REGION_TO_USE ))
+	Em_EEPROM_config.userFlashStartAddr = (uint32_t) APP_DEFINED_EM_EEPROM_LOCATION_IN_FLASH;
+#else
+	Em_EEPROM_config.userFlashStartAddr = (uint32_t) EepromStorage;
+#endif
+
+	eepromReturnValue = Cy_Em_EEPROM_Init(&Em_EEPROM_config, &Em_EEPROM_context);
+	HandleError(eepromReturnValue, "Emulated EEPROM Initialization Error \r\n");
+
+	/* Read 15 bytes out of EEPROM memory. */
+	eepromReturnValue = Cy_Em_EEPROM_Read(LOGICAL_EEPROM_START, id, len, &Em_EEPROM_context);
+	HandleError(eepromReturnValue, "Emulated EEPROM Read failed \r\n");
+}
+
+#if 1	//write to EEPROM
+void write_ID(char* id, uint8_t len)
+{
+	cy_en_em_eeprom_status_t eepromReturnValue;
 		/* Initialize the flash start address in EEPROM configuration structure. */
 	#if ((defined(TARGET_CY8CKIT_064B0S2_4343W)||(defined(TARGET_CY8CPROTO_064B0S3))) && (USER_FLASH == FLASH_REGION_TO_USE ))
 		Em_EEPROM_config.userFlashStartAddr = (uint32_t) APP_DEFINED_EM_EEPROM_LOCATION_IN_FLASH;
@@ -848,124 +1136,9 @@ void alarm_task(void *arg){
 		eepromReturnValue = Cy_Em_EEPROM_Init(&Em_EEPROM_config, &Em_EEPROM_context);
 		HandleError(eepromReturnValue, "Emulated EEPROM Initialization Error \r\n");
 
-		/* Read 15 bytes out of EEPROM memory. */
-		eepromReturnValue = Cy_Em_EEPROM_Read(LOGICAL_EEPROM_START, eepromReadArray,
-												LOGICAL_EEPROM_SIZE, &Em_EEPROM_context);
-		HandleError(eepromReturnValue, "Emulated EEPROM Read failed \r\n");
+		/* Write initial data to EEPROM. */
+		eepromReturnValue = Cy_Em_EEPROM_Write(LOGICAL_EEPROM_START, id, len,&Em_EEPROM_context);
 
-		/* If first byte of EEPROM is not 'P', then write the data for initializing
-		* the EEPROM content.
-		*/
-		if(flag == false)
-		{
-			flag = true;
-			/* Write initial data to EEPROM. */
-			eepromReturnValue = Cy_Em_EEPROM_Write(LOGICAL_EEPROM_START,
-													eepromWriteArray,
-													LOGICAL_EEPROM_SIZE,
-													&Em_EEPROM_context);
-			HandleError(eepromReturnValue, "Emulated EEPROM Write failed \r\n");
-
-		}
-		
-		/* Read contents of EEPROM after write. */
-		eepromReturnValue = Cy_Em_EEPROM_Read(LOGICAL_EEPROM_START,
-												eepromReadArray, LOGICAL_EEPROM_SIZE,
-												&Em_EEPROM_context);
-		HandleError(eepromReturnValue, "Emulated EEPROM Read failed \r\n" );
-
-		for(count = 0; count < LOGICAL_EEPROM_SIZE ; count++){
-			printf("%c",eepromReadArray[count]);
-		}
-		printf("\r\n");
-		printf("Displaying demo \r\n");									
-
-		for(count = 0; count < LOGICAL_EEPROM_SIZE ; count++){
-			char c =(char)(eepromReadArray[count]);
-			save_memory[count] = c;
-		}
-		printf("To here \r\n");
-	    printf("\r\n");
-
-		for(count = 0; count < LOGICAL_EEPROM_SIZE ; count++){
-				printf("%c", save_memory[count]);
-		}
-		printf("To here there \r\n");
-
-		int i = json_parser_snippet();
-
-		if(date_flag == false)
-		{
-			struct tm new_time = {0};
-			if (validate_date_time(current_sec, current_min, current_hour, current_mday, current_month, current_year))
-			{
-				new_time.tm_sec = current_sec;
-				new_time.tm_min = current_min;
-				new_time.tm_hour = current_hour;
-				new_time.tm_mday = current_mday;
-				new_time.tm_mon = month - 1;
-				new_time.tm_year = year - TM_YEAR_BASE;
-				//new_time.tm_wday = get_day_of_week(mday, month, year);
-
-				rslt = cyhal_rtc_write(&rtc_obj, &new_time);
-				if (CY_RSLT_SUCCESS == rslt)
-				{
-					printf("\rRTC time updated\r\n\n");
-				}
-				else
-				{
-					handle_error();
-				}
-			}
-			else
-			{
-				printf("\rInvalid values! Please enter the values in specified"
-						" format\r\n");
-			}
-			date_flag = true;
-		}		
-
-        printf("%d",i);
-		printf("\r\n");
-		printf("%d",year);
-		printf("\r\n");
-
-		printf("%d",month);
-		printf("\r\n");
-
-		printf("%d",day);
-		printf("\r\n");
-
-		printf("%d",hour);
-		printf("\r\n");
-
-		printf("%d",minute);
-		printf("\r\n");
-
-		printf("%d",(date_time.tm_year+TM_YEAR_BASE));
-		printf("\r\n");
-		
-		printf("%d",(date_time.tm_mon+1));
-		printf("\r\n");
-
-		printf("%d",date_time.tm_mday);
-		printf("\r\n");
-
-		printf("%d",date_time.tm_hour);
-		printf("\r\n");
-
-		printf("%d",date_time.tm_min);
-		printf("\r\n");
-
-
-		if(((date_time.tm_mon+1) == month) && (date_time.tm_mday== day )&& (date_time.tm_hour == hour )&& (date_time.tm_min == minute))
-		{
-			printf("\r\n hello......................");
-			cyhal_gpio_write(CYBSP_USER_LED, CYBSP_LED_STATE_OFF);
-
-			cyhal_system_delay_ms(60000);
-		}		
-
-		cyhal_system_delay_ms(5000);
-	}
+		HandleError(eepromReturnValue, "Emulated EEPROM Write failed \r\n");
 }
+#endif

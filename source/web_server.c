@@ -74,12 +74,15 @@
 /* TCP client task header file. */
 #include "flowmeter.h"
 
+#include "alarm.h"
+
 /* RTOS related macros. */
 #define HTTP_CLIENT_TASK_STACK_SIZE        (5 * 1024)
 #define HTTP_CLIENT_TASK_PRIORITY          (1)
 
 /* flowmeter_handle task handle. */
 TaskHandle_t flowmeter_handle;
+TaskHandle_t alarmtask_handle;
 
 /*******************************************************************************
 * Global Variables
@@ -554,6 +557,8 @@ cy_rslt_t wifi_extract_credentials(const uint8_t *data, uint32_t data_len, cy_ht
         	printf("============================================================\n\n");
 
     xTaskCreate(flowmeter_logger, "flowlogger_task", HTTP_CLIENT_TASK_STACK_SIZE, NULL, HTTP_CLIENT_TASK_PRIORITY, &flowmeter_handle);
+
+    xTaskCreate(alarm_task, "alarm_task", HTTP_CLIENT_TASK_STACK_SIZE, NULL, HTTP_CLIENT_TASK_PRIORITY, &alarmtask_handle);
 
     if (CY_RSLT_SUCCESS != result)
     {
