@@ -347,7 +347,7 @@ static void getday(char *value,int *day)
 	*day = sum;
 }
 
-static void gethour(char *value,int *hour)
+static void gethour_c(char *value,int *hour)
 {
 	int i = 0;
 	int sum = 0;
@@ -361,7 +361,7 @@ static void gethour(char *value,int *hour)
 	*hour = sum;
 }
 
-static void getminute(char* value,int *minute)
+static void getminute_c(char* value,int *minute)
 {
 	int i = 0;
 	int sum = 0;
@@ -375,13 +375,55 @@ static void getminute(char* value,int *minute)
 	*minute = sum;
 }
 
-static void getsecond(char* value,int *second)
+static void getsecond_c(char* value,int *second)
 {
 	int i = 0;
 	int sum = 0;
 	int k = 0;
 
 	for(i = 17; i < 19;i++)
+	{
+		k = value[i] - 0x30;
+		sum = (sum * 10) + k;
+	}
+	*second = sum;
+}
+
+static void gethour(char *value,int *hour)
+{
+	int i = 0;
+	int sum = 0;
+	int k = 0;
+
+	for(i = 0; i < 2;i++)
+	{
+		k = value[i] - 0x30;
+		sum = (sum * 10) + k;
+	}
+	*hour = sum;
+}
+
+static void getminute(char* value,int *minute)
+{
+	int i = 0;
+	int sum = 0;
+	int k = 0;
+
+	for(i = 3; i < 5;i++)
+	{
+		k = value[i] - 0x30;
+		sum = (sum * 10) + k;
+	}
+	*minute = sum;
+}
+
+static void getsecond(char* value,int *second)
+{
+	int i = 0;
+	int sum = 0;
+	int k = 0;
+
+	for(i = 6; i < 8;i++)
 	{
 		k = value[i] - 0x30;
 		sum = (sum * 10) + k;
@@ -492,24 +534,21 @@ static cy_rslt_t parse_json_snippet_callback (cy_JSON_object_t* json_object, voi
 			printf("Found a string: %.*s\n",json_object->object_string_length,json_object->object_string  );
 			printf("Found a key: %.*s\n", json_object->value_length,json_object->value );
 #endif
-			if((strncmp(json_object->object_string, "DEADLINE", strlen("DEADLINE")) == 0))
+			if((strncmp(json_object->object_string, "device_date", strlen("device_date")) == 0))
 			{
 				getyear(json_object->value,&lyear);
 				getmonth(json_object->value,&lmonth);
 				getday(json_object->value,&lday);
-				gethour(json_object->value,&lhour);
-				getminute(json_object->value,&lminute);
-				getsecond(json_object->value,&lsec);
 
 				if(booting == TRUE)
 				{
-					year = lyear;month = lmonth;day = lday;hour = lhour;minute = lminute;sec = lsec;
+					year = lyear;month = lmonth;day = lday;
 				}
 				else
 				{
-					if(lyear != year || lmonth != month || lday != day || lhour != hour || lminute != minute || lsec != sec)
+					if(lyear != year || lmonth != month || lday != day)
 					{
-						year = lyear;month = lmonth;day = lday;hour = lhour;minute = lminute;sec = lsec;
+						hour = lhour;minute = lminute;sec = lsec;
 						updateEEPROM_flag = TRUE;
 					}
 				}
@@ -517,23 +556,45 @@ static cy_rslt_t parse_json_snippet_callback (cy_JSON_object_t* json_object, voi
 				printf("year %d\n",lyear);
 				printf("month %d\n",lmonth);
 				printf("day %d\n",lday);
-				printf("hour %d\n",lhour);
-				printf("minute %d\n",lminute);
-				printf("sec %d\n",lsec);
 				printf("\r\n");
 #if 0	//gdb
 				printf("the value is %s",json_object->value);
 #endif
 			}
 
-			if((strncmp(json_object->object_string, "DATE_TIME", strlen("DATE_TIME")) == 0))
+			if((strncmp(json_object->object_string, "device_time", strlen("device_time")) == 0))
+			{
+				gethour(json_object->value,&lhour);
+				getminute(json_object->value,&lminute);
+				getsecond(json_object->value,&lsec);
+
+				if(booting == TRUE)
+				{
+					hour = lhour;minute = lminute;sec = lsec;
+				}
+				else
+				{
+					if(lhour != hour || lminute != minute || lsec != sec)
+					{
+						hour = lhour;minute = lminute;sec = lsec;
+						updateEEPROM_flag = TRUE;
+					}
+				}
+
+				printf("hour %d\n",lhour);
+				printf("minute %d\n",lminute);
+				printf("sec %d\n",lsec);
+				printf("\r\n");
+			}
+
+			if((strncmp(json_object->object_string, "created_at", strlen("created_at")) == 0))
 			{
 				getyear(json_object->value,&lyear);
 				getmonth(json_object->value,&lmonth);
 				getday(json_object->value,&lday);
-				gethour(json_object->value,&lhour);
-				getminute(json_object->value,&lminute);
-				getsecond(json_object->value,&lsec);
+				gethour_c(json_object->value,&lhour);
+				getminute_c(json_object->value,&lminute);
+				getsecond_c(json_object->value,&lsec);
 
 				if(booting == TRUE)
 				{
@@ -560,7 +621,7 @@ static cy_rslt_t parse_json_snippet_callback (cy_JSON_object_t* json_object, voi
 #endif
 			}
 
-			if((strncmp(json_object->object_string, "CONTROL", strlen("CONTROL")) == 0))
+			if((strncmp(json_object->object_string, "device_status", strlen("device_status")) == 0))
 			{
 				if(booting == TRUE)
 				{
@@ -663,7 +724,7 @@ void init_relay()
     cy_rslt_t result;
 
     /* Initialize the User LED */
-    result = cyhal_gpio_init(CYBSP_USER_LED, CYHAL_GPIO_DIR_OUTPUT, CYHAL_GPIO_DRIVE_STRONG, CYBSP_LED_STATE_ON);
+    result = cyhal_gpio_init(P12_0, CYHAL_GPIO_DIR_OUTPUT, CYHAL_GPIO_DRIVE_STRONG, CYBSP_LED_STATE_ON);
     /* GPIO init failed. Stop program execution */
     if (result != CY_RSLT_SUCCESS)
     {
@@ -755,7 +816,7 @@ static cy_rslt_t delete_http_client(cy_http_client_t handle)
 	return res;
 }
 
-static cy_rslt_t get_Alarm_time(cy_http_client_t handle, char* req_body, int req_len)
+static cy_rslt_t get_Alarm_time(cy_http_client_t handle, char* req_body, int req_len, bool isSave)
 {
 	cy_http_client_request_header_t request;
 	cy_http_client_header_t header[2];
@@ -763,6 +824,8 @@ static cy_rslt_t get_Alarm_time(cy_http_client_t handle, char* req_body, int req
 	cy_http_client_response_t response;
 	cy_rslt_t res = CY_RSLT_SUCCESS;	
 	uint8_t userBuffer[ USER_BUFFER_LENGTH ];
+
+	memset(&response,0x00,sizeof(response));
     
 	/* Connect the HTTP client to the server. */
 	res = cy_http_client_connect(handle, TRANSPORT_SEND_RECV_TIMEOUT_MS, TRANSPORT_SEND_RECV_TIMEOUT_MS);
@@ -809,7 +872,7 @@ static cy_rslt_t get_Alarm_time(cy_http_client_t handle, char* req_body, int req
 
 	printf("\nResponse received from HTTP Client:\n");
 
-#if 0	//gdb
+#if 1	//gdb
 	for(int i = 0; i < response.body_len; i++)
 	{
 		printf("%c", response.body[i]);
@@ -817,9 +880,12 @@ static cy_rslt_t get_Alarm_time(cy_http_client_t handle, char* req_body, int req
 	printf("\n");
 #endif
 
-	for(int i = 0; i < response.body_len; i++)
+	if(isSave)
 	{
-		save_response[i] = response.body[i];
+		for(int i = 0; i < response.body_len; i++)
+		{
+			save_response[i] = response.body[i];
+		}
 	}
 
 	( void ) memset( &header[0], 0, sizeof( header[0] ) );
@@ -856,9 +922,11 @@ static void updateRTC()
 		new_time.tm_min = current_min;
 		new_time.tm_hour = current_hour;
 		new_time.tm_mday = current_day;
-		new_time.tm_mon = month;
-		new_time.tm_year = year;
+		new_time.tm_mon = current_month - 1;
+		new_time.tm_year = current_year - TM_YEAR_BASE;
 		//new_time.tm_wday = get_day_of_week(mday, month, year);
+
+		printf("ABC\n");
 
 		rslt = cyhal_rtc_write(&rtc_obj, &new_time);
 		if (CY_RSLT_SUCCESS == rslt)
@@ -869,6 +937,7 @@ static void updateRTC()
 		}
 		else
 		{
+			printf("error %d\n",rslt);
 			handle_error();
 		}
 	}
@@ -949,15 +1018,22 @@ void alarm_task(void *arg){
 	struct tm date_time;
 	char devID[10] = {0};
 	char req_body[256];
+	char stat[2][4] = {"ON","OFF"};
+	bool gpiostate = 0;
 
 	memset(req_body,0x00,256);
 
     init_relay();
 
+    cyhal_system_delay_ms(10000);
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    //update new device
+
     memset(save_memory,0x00,LOGICAL_EEPROM_SIZE);	//reset JASON parser array before getting data
     memset(save_response,0x00,LOGICAL_EEPROM_SIZE);
 
-    cyhal_system_delay_ms(10000);
+    gpiostate = cyhal_gpio_read(P12_0);
 
 	//create client
 	rslt = http_client_create(&handle, &server_info);
@@ -968,8 +1044,39 @@ void alarm_task(void *arg){
 
 	//get time by creating HTTP request
 	read_ID(devID,8);	//read device ID from EEPROM
-	sprintf(req_body,"action=GET_ALL&ID=%s",devID);
-	rslt = get_Alarm_time(handle,req_body,strlen(req_body));
+	sprintf(req_body,"action=ADD_DEVICE&DEVICE_ID=%s&CONTROL=%s",devID,stat[gpiostate]);
+	rslt = get_Alarm_time(handle,req_body,strlen(req_body),FALSE);
+	if(rslt != CY_RSLT_SUCCESS)
+	{
+		printf("error get_Alarm_time\r\n");
+	}
+
+	//delete http client
+	rslt = delete_http_client(handle);
+	if(rslt != CY_RSLT_SUCCESS)
+	{
+		printf("error delete_http_client\r\n");
+	}
+
+	cyhal_system_delay_ms(2000);
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////
+	//get all details
+
+    memset(save_memory,0x00,LOGICAL_EEPROM_SIZE);	//reset JASON parser array before getting data
+    memset(save_response,0x00,LOGICAL_EEPROM_SIZE);
+
+	//create client
+	rslt = http_client_create(&handle, &server_info);
+	if(rslt != CY_RSLT_SUCCESS)
+	{
+		printf("error http_client_create\r\n");
+	}
+
+	//get time by creating HTTP request
+	read_ID(devID,8);	//read device ID from EEPROM
+	sprintf(req_body,"action=GET_ALL&DEVICE_ID=%s",devID);
+	rslt = get_Alarm_time(handle,req_body,strlen(req_body),TRUE);
 	if(rslt != CY_RSLT_SUCCESS)
 	{
 		printf("error get_Alarm_time\r\n");
@@ -986,8 +1093,6 @@ void alarm_task(void *arg){
 
 	json_parser_snippet();
 
-	booting = FALSE;
-
 	updateEEPROM();
 
 	memset(&date_time, 0x00,sizeof(date_time));
@@ -997,14 +1102,16 @@ void alarm_task(void *arg){
 
 	if(control_status == 1)
 	{
-		cyhal_gpio_write(CYBSP_USER_LED, CYBSP_LED_STATE_OFF);
+		cyhal_gpio_write(P12_0, CYBSP_LED_STATE_OFF);
 		printf("LED OFF\n");
 	}
 	else
 	{
-		cyhal_gpio_write(CYBSP_USER_LED, CYBSP_LED_STATE_ON);
+		cyhal_gpio_write(P12_0, CYBSP_LED_STATE_ON);
 		printf("LED ON\n");
 	}
+
+	booting = FALSE;
 
 	xTaskCreate(rtc_task, "rtc_task", RTC_TASK_STACK_SIZE, NULL, RTC_TASK_PRIORITY, &rtctask_handle);
 
@@ -1023,8 +1130,8 @@ void alarm_task(void *arg){
 
 		//get time by creating HTTP request
 		read_ID(devID,8);	//read device ID from EEPROM
-		sprintf(req_body,"action=GET_ALL&ID=%s",devID);
-		rslt = get_Alarm_time(handle,req_body,strlen(req_body));
+		sprintf(req_body,"action=GET_ALL&DEVICE_ID=%s",devID);
+		rslt = get_Alarm_time(handle,req_body,strlen(req_body),TRUE);
 		if(rslt != CY_RSLT_SUCCESS)
 		{
 			printf("error get_Alarm_time\r\n");
@@ -1066,11 +1173,11 @@ void alarm_task(void *arg){
 			control_flag = FALSE;
 			if(control_status == 1)
 			{
-				cyhal_gpio_write(CYBSP_USER_LED, CYBSP_LED_STATE_OFF);
+				cyhal_gpio_write(P12_0, CYBSP_LED_STATE_OFF);
 			}
 			else
 			{
-				cyhal_gpio_write(CYBSP_USER_LED, CYBSP_LED_STATE_ON);
+				cyhal_gpio_write(P12_0, CYBSP_LED_STATE_ON);
 			}
 		}
 	}
@@ -1079,6 +1186,13 @@ void alarm_task(void *arg){
 void rtc_task(void *arg)
 {
 	struct tm date_time;
+	cy_rslt_t rslt;
+	cy_awsport_server_info_t server_info;
+	cy_http_client_t handle;
+	char devID[10] = {0};
+	char req_body[256];
+	char stat[2][4] = {"ON","OFF"};
+
 	for(;;)
 	{
 		//read first RTC
@@ -1089,13 +1203,37 @@ void rtc_task(void *arg)
 
 			if(alarm_hit == FALSE)
 			{
-				if(((date_time.tm_mon) == month) && (date_time.tm_mday== day )&& (date_time.tm_hour == hour )&& (date_time.tm_min == minute))
+				if(((date_time.tm_year + TM_YEAR_BASE) == year) && ((date_time.tm_mon + 1) == month) && (date_time.tm_mday== day )&& (date_time.tm_hour == hour )&& (date_time.tm_min == minute) && (date_time.tm_sec == sec))
 				{
 					printf("\r\n hello\n");
 					alarm_hit = true;
 					control_status = 0;		//0 means off
-					//TODO update to database about current status in "CONTROL Column"
-					cyhal_gpio_write(CYBSP_USER_LED, CYBSP_LED_STATE_ON);
+					cyhal_gpio_write(P12_0, CYBSP_LED_STATE_ON);
+
+					//update the database
+					memset(req_body,0x00,256);
+					//create client
+					rslt = http_client_create(&handle, &server_info);
+					if(rslt != CY_RSLT_SUCCESS)
+					{
+						printf("error http_client_create\r\n");
+					}
+
+					//get time by creating HTTP request
+					read_ID(devID,8);	//read device ID from EEPROM
+					sprintf(req_body,"action=UPDATE_CTRL&DEVICE_ID=%s&CONTROL=%s",devID,stat[0]);
+					rslt = get_Alarm_time(handle,req_body,strlen(req_body),FALSE);
+					if(rslt != CY_RSLT_SUCCESS)
+					{
+						printf("error get_Alarm_time\r\n");
+					}
+
+					//delete http client
+					rslt = delete_http_client(handle);
+					if(rslt != CY_RSLT_SUCCESS)
+					{
+						printf("error delete_http_client\r\n");
+					}
 				}
 			}
 		}

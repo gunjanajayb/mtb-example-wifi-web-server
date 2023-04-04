@@ -105,7 +105,7 @@ volatile int counterpulse_diff = 0;
 
 
 #define TRANSPORT_SEND_RECV_TIMEOUT_MS    ( 5000 )
-#define GET_PATH                        "/tdsApi/readts.php"
+#define GET_PATH                        "/tdsApi/readflow.php"
 #define USER_BUFFER_LENGTH                ( 2048 )
 #define REQUEST_BODY                    "{\"status\":\"ON\",\"device\":\"123\"}"
 #define REQUEST_BODY_LENGTH        ( sizeof( REQUEST_BODY ) - 1 )
@@ -286,7 +286,7 @@ static void init_adc(cyhal_adc_channel_t* adc_chan_0_obj)
 
 void flowmeter_logger(void *arg){
 
-	char eventValue[128];
+	char eventValue[256];
 	// ADC channel object
 	cyhal_adc_channel_t adc_chan_0_obj;	
 	// Var used for storing conversion result
@@ -298,12 +298,14 @@ void flowmeter_logger(void *arg){
 	float newflowrate=0;
 	float flowrate=0;
 	char device_id[10] = {0};
-	char stat[2][4] = {"OFF","ON"};
+	char stat[2][4] = {"ON","OFF"};
 	bool gpiostate = 0;
 	int counterpulse_prev = 0;
+	int tds = 0;
+	int counter = 0;
 
 #if 1 	//write to EEPROM
-	char devIDtoBeWritten[10] = {"00400214"};
+	char devIDtoBeWritten[10] = {"00400215"};
 	write_ID(devIDtoBeWritten,8);
 #endif
 
@@ -311,6 +313,8 @@ void flowmeter_logger(void *arg){
 
 	while(1)
 	{
+		counter++;
+
 		res = CY_RSLT_SUCCESS;
 		// Poll the flowmeter once a second
 		cyhal_system_delay_ms(60000);
@@ -320,21 +324,22 @@ void flowmeter_logger(void *arg){
 		
 		newflowrate =  adc_out;
 		
-		if(newflowrate)
-		{
-			flowrate = flowrate + newflowrate;
+		flowrate = flowrate + newflowrate;
 
-			gpiostate = cyhal_gpio_read(CYBSP_USER_LED);
+		//if(counter == 0xFFFFFF)
+		{
+			counter = 0;
+			gpiostate = cyhal_gpio_read(P12_0);
 
 			//gdb sprintf(eventValue, "FLOWRATE=%f&ID=%s&STATUS=%s", flowrate,device_id,stat[gpiostate]);
-			sprintf(eventValue, "action=UPDATE_FLOW&ID=%s&FLOW=%f", device_id,flowrate);
-
-#ifdef FYI_ENABLE			
+			tds = rand() % 100;
+			sprintf(eventValue, "action=UPDATE_FLOW&device_id=%s&litre=%f&tds=%d&status=%s",device_id,flowrate,tds,stat[gpiostate]);
+		#ifdef FYI_ENABLE
 			printf("sending flowrate: %f.\n", flowrate);
-#endif			
+		#endif
 			bodyLength = strlen(eventValue);
 
-			//create client 
+			//create client
 			res = http_client_create(&handle, &server_info);
 			if(res != CY_RSLT_SUCCESS)
 			{
@@ -344,21 +349,20 @@ void flowmeter_logger(void *arg){
 			res = log_flowrate(handle,eventValue,bodyLength);
 			if(res != CY_RSLT_SUCCESS)
 			{
-#ifdef FYI_ENABLE				
+		#ifdef FYI_ENABLE
 				printf("log flow rate failed %d\n",res);
-#endif				
-			}	
-			
+		#endif
+			}
+
 			res = delete_http_client(handle);
 			if(res != CY_RSLT_SUCCESS)
 			{
-#ifdef FYI_ENABLE								
+		#ifdef FYI_ENABLE
 				printf("delete_http_client failed %d\n",res);
-#endif								
+		#endif
 			}
 		}
 	}
-
 }
 /*******************************************************************************
  * Function Name: connect_to_wifi_ap()
