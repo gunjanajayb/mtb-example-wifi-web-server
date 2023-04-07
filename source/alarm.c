@@ -87,7 +87,7 @@ int LOGICAL_EEPROM_SIZE=250;
 
 #define GPIO_LOW                (0u)
 
-//#define DEBUG_PIN_LED
+#define DEBUG_PIN_LED
 
 #ifdef DEBUG_PIN_LED
 #define RELAY_PIN CYBSP_USER_LED
@@ -495,7 +495,7 @@ static cy_rslt_t parse_json_snippet_callback (cy_JSON_object_t* json_object, voi
 	{
 		case JSON_STRING_TYPE:
 		{
-#if 0	//gdb
+#if 0
 			printf("Found a string: %.*s\n",json_object->object_string_length,json_object->object_string  );
 			printf("Found a key: %.*s\n", json_object->value_length,json_object->value );
 #endif
@@ -522,9 +522,6 @@ static cy_rslt_t parse_json_snippet_callback (cy_JSON_object_t* json_object, voi
 				printf("month %d\n",lmonth);
 				printf("day %d\n",lday);
 				printf("\r\n");
-#if 0	//gdb
-				printf("the value is %s",json_object->value);
-#endif
 			}
 
 			if((strncmp(json_object->object_string, "device_time", strlen("device_time")) == 0))
@@ -569,9 +566,6 @@ static cy_rslt_t parse_json_snippet_callback (cy_JSON_object_t* json_object, voi
 					{
 						lcntrl_stat = 0xFF;
 					}
-#if 0	//gdb
-					printf("CONTROL %s %d %d\n",lcntrl,lcntrl_stat,control_status);
-#endif
 					control_status = lcntrl_stat;
 				}
 				else
@@ -589,9 +583,6 @@ static cy_rslt_t parse_json_snippet_callback (cy_JSON_object_t* json_object, voi
 					{
 						lcntrl_stat = 0xFF;
 					}
-#if 0	//gdb
-					printf("CONTROL %s %d %d\n",lcntrl,lcntrl_stat,control_status);
-#endif
 
 					if(control_status != lcntrl_stat)
 					{
@@ -635,8 +626,8 @@ static cy_rslt_t parse_json_snippet_callback (cy_JSON_object_t* json_object, voi
 
 			if((strncmp(json_object->object_string, "year", strlen("year")) == 0))
 			{
-				current_year = (int)json_object->intval;
 			}
+				current_year = (int)json_object->intval;
 			break;
 		}
 		case JSON_FLOAT_TYPE:
@@ -835,13 +826,11 @@ static cy_rslt_t get_http_response(cy_http_client_t handle, char* req_body, int 
 
 	printf("\nResponse received from HTTP Client:\n");
 
-#if 1	//gdb
 	for(int i = 0; i < response.body_len; i++)
 	{
 		printf("%c", response.body[i]);
 	}
 	printf("\n");
-#endif
 
 	if(isSave)
 	{
@@ -984,12 +973,15 @@ void alarm_task(void *arg){
 
 	memset(req_body,0x00,256);
 
-    init_relay();
+    init_relay();	//initialize GPIO for relay control
 
+    //Give some delay for flowmeter_logger task to write device ID in Flash
+    //This is temporary and it will be removed when device ID is stored in EEPROM
     cyhal_system_delay_ms(10000);
 
 	read_ID(devID,8);	//read device ID from EEPROM
-	gpiostate = cyhal_gpio_read(RELAY_PIN);
+
+	gpiostate = cyhal_gpio_read(RELAY_PIN);		//take initial state of Relay
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     //Get server time for RTC
 
@@ -1003,6 +995,7 @@ void alarm_task(void *arg){
 		printf("error http_client_create\r\n");
 	}
 
+	//create a request body to get time from server
 	sprintf(req_body,"action=GET_TIME");
 	rslt = get_http_response(handle,req_body,strlen(req_body),TRUE);
 	if(rslt != CY_RSLT_SUCCESS)
@@ -1032,8 +1025,10 @@ void alarm_task(void *arg){
 	memset(&date_time, 0x00,sizeof(date_time));
 	init_RTC(&date_time);
 
+	//this function will update RTC time to what we got from server
 	updateRTC();
 
+	//give some delay
 	cyhal_system_delay_ms(2000);
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1069,8 +1064,11 @@ void alarm_task(void *arg){
 
 	json_parser_snippet();
 
+	//save deadline time and control info to EEPROM
 	updateEEPROM();
 
+	//this control_status variable is updated in json parsing function.
+	//take action according to its value
 	if(control_status == 1)
 	{
 		cyhal_gpio_write(RELAY_PIN, CYBSP_LED_STATE_OFF);
@@ -1084,6 +1082,7 @@ void alarm_task(void *arg){
 
 	booting = FALSE;
 
+	//This task's job is to check whether deadline is hit or not and take action accordingly
 	xTaskCreate(rtc_task, "rtc_task", RTC_TASK_STACK_SIZE, NULL, RTC_TASK_PRIORITY, &rtctask_handle);
 
 	for(;;)
@@ -1142,16 +1141,14 @@ void alarm_task(void *arg){
 		{
 			printf("update control\n");
 			control_flag = FALSE;
-			if(alarm_hit == false)
+			if(control_status == 1)
 			{
-				if(control_status == 1)
-				{
-					cyhal_gpio_write(RELAY_PIN, CYBSP_LED_STATE_OFF);
-				}
-				else
-				{
-					cyhal_gpio_write(RELAY_PIN, CYBSP_LED_STATE_ON);
-				}
+				alarm_hit = FALSE;		//make this flag to false so that next deadline can be hit correctly
+				cyhal_gpio_write(RELAY_PIN, CYBSP_LED_STATE_OFF);
+			}
+			else
+			{
+				cyhal_gpio_write(RELAY_PIN, CYBSP_LED_STATE_ON);
 			}
 		}
 	}
@@ -1180,10 +1177,8 @@ void rtc_task(void *arg)
 				if(((date_time.tm_year + TM_YEAR_BASE) == year) && ((date_time.tm_mon + 1) == month) && (date_time.tm_mday== day )&& (date_time.tm_hour == hour )&& (date_time.tm_min == minute))
 				{
 					printf("\r\n hello\n");
-					alarm_hit = true;
-					control_status = 0;		//0 means off
 					cyhal_gpio_write(RELAY_PIN, CYBSP_LED_STATE_ON);
-#if 1	//TODO_GDB
+
 					//update the database
 					memset(req_body,0x00,256);
 					//create client
@@ -1208,7 +1203,9 @@ void rtc_task(void *arg)
 					{
 						printf("error delete_http_client\r\n");
 					}
-#endif
+					control_status = 0;		//0 means off
+					alarm_hit = true;
+
 				}
 			}
 		}

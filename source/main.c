@@ -151,11 +151,6 @@ int main(void)
     xTaskCreate(server_task, "HTTP Web Server", SERVER_TASK_STACK_SIZE, NULL,
                 SERVER_TASK_PRIORITY, &server_task_handle);
 
-#if 0	//gdb
-    xTaskCreate(flowsensor_task, "flow sensor task", FLOWSENSE_TASK_STACK_SIZE, NULL,
-                FLOWSENSE_TASK_PRIORITY, &flowsens_task_handle);
-#endif
-
     /* Start the FreeRTOS scheduler */
     vTaskStartScheduler();
 

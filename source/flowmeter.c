@@ -73,7 +73,7 @@
 //#define ANYTHINGRESOURCE					"estorem.highmindsgroup.com/psoc/sample.php"
 #define FYI_ENABLE 1
 
-//#define DEBUG_PIN_LED
+#define DEBUG_PIN_LED
 
 #ifdef DEBUG_PIN_LED
 #define RELAY_PIN CYBSP_USER_LED
@@ -312,11 +312,12 @@ void flowmeter_logger(void *arg){
 	int tds = 0;
 	int counter = 0;
 
-#if 1 	//write to EEPROM
+#if 1 	//write to EEPROM	// this is temporary until flash/EEPROM issue fix
 	char devIDtoBeWritten[10] = {"00400215"};
 	write_ID(devIDtoBeWritten,8);
 #endif
 
+	//read device ID from EEPROM
 	read_ID(&device_id[0],8);
 
 	while(1)
@@ -334,7 +335,7 @@ void flowmeter_logger(void *arg){
 		
 		flowrate = flowrate + newflowrate;
 
-		if(counter == 300)
+		if(counter == 300)	//log data to table every 5 minutes
 		{
 			counter = 0;
 			gpiostate = cyhal_gpio_read(RELAY_PIN);
@@ -449,18 +450,6 @@ cy_rslt_t connect_to_wifi_ap(void)
 void disconnect_callback(void *arg){
     printf("Disconnected from HTTP Server\n");
     connected = false;
-}
-
-void flowsensor_task(void *arg)
-{
-	int counterpulse_prev = 0;
-	for(;;)
-	{
-		//check the pulse every second
-		vTaskDelay(pdMS_TO_TICKS(1000));
-		counterpulse_diff = counterpulse_curr - counterpulse_prev;
-		counterpulse_prev = counterpulse_curr;
-	}
 }
 
 void gpio_interrupt_handler(void *handler_arg, cyhal_gpio_event_t event)
