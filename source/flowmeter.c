@@ -73,6 +73,14 @@
 //#define ANYTHINGRESOURCE					"estorem.highmindsgroup.com/psoc/sample.php"
 #define FYI_ENABLE 1
 
+//#define DEBUG_PIN_LED
+
+#ifdef DEBUG_PIN_LED
+#define RELAY_PIN CYBSP_USER_LED
+#else
+#define RELAY_PIN P12_0
+#endif
+
 /*******************************************************************************
 * Function Prototypes
 ********************************************************************************/
@@ -329,7 +337,7 @@ void flowmeter_logger(void *arg){
 		//if(counter == 0xFFFFFF)
 		{
 			counter = 0;
-			gpiostate = cyhal_gpio_read(P12_0);
+			gpiostate = cyhal_gpio_read(RELAY_PIN);
 
 			//gdb sprintf(eventValue, "FLOWRATE=%f&ID=%s&STATUS=%s", flowrate,device_id,stat[gpiostate]);
 			tds = rand() % 100;
