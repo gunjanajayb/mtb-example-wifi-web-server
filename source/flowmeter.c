@@ -325,21 +325,20 @@ void flowmeter_logger(void *arg){
 
 		res = CY_RSLT_SUCCESS;
 		// Poll the flowmeter once a second
-		cyhal_system_delay_ms(60000);
+		cyhal_system_delay_ms(1000);
 
-		adc_out = (float)(counterpulse_curr)/ (float)7.5 ;
+		adc_out = (float)(counterpulse_curr)/ (float)73 ;
 		counterpulse_curr = 0;
 		
-		newflowrate =  adc_out;
+		newflowrate =  adc_out/60;
 		
 		flowrate = flowrate + newflowrate;
 
-		//if(counter == 0xFFFFFF)
+		if(counter == 300)
 		{
 			counter = 0;
 			gpiostate = cyhal_gpio_read(RELAY_PIN);
 
-			//gdb sprintf(eventValue, "FLOWRATE=%f&ID=%s&STATUS=%s", flowrate,device_id,stat[gpiostate]);
 			tds = rand() % 100;
 			sprintf(eventValue, "action=UPDATE_FLOW&device_id=%s&litre=%f&tds=%d&status=%s",device_id,flowrate,tds,stat[gpiostate]);
 		#ifdef FYI_ENABLE
