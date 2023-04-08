@@ -176,7 +176,7 @@ static cy_rslt_t log_flowrate(cy_http_client_t handle, char* str_flowrate, uint3
 	else
 	{
 #ifdef FYI_ENABLE		
-		printf("\nConnected to HTTP Server Successfully\n\n");
+		printf("\nConnected to HTTP Server Successfully logflow\n\n");
 #endif
 	}
 

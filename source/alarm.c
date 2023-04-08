@@ -626,8 +626,8 @@ static cy_rslt_t parse_json_snippet_callback (cy_JSON_object_t* json_object, voi
 
 			if((strncmp(json_object->object_string, "year", strlen("year")) == 0))
 			{
-			}
 				current_year = (int)json_object->intval;
+			}
 			break;
 		}
 		case JSON_FLOAT_TYPE:
@@ -788,7 +788,7 @@ static cy_rslt_t get_http_response(cy_http_client_t handle, char* req_body, int 
 		printf("HTTP Client Connection Failed!\n");
 
 	}else{
-		printf("\nConnected to HTTP Server Successfully\n\n");
+		printf("\nConnected to HTTP Server Successfully getht %d\n\n",isSave);
 
 	}
 
