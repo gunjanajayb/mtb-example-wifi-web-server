@@ -179,6 +179,8 @@ static char http_wifi_connect_response[WIFI_CONNECT_RESPONSE_LENGTH] = {0};
 /* Array to store Wi-Fi scan response. */
 static char http_scan_response[MAX_WIFI_SCAN_HTTP_RESPONSE_LENGTH] = {0};
 
+volatile bool taskCreated = false;
+
 /*******************************************************************************
  * Function Name: process_sse_handler
  *******************************************************************************
@@ -521,6 +523,10 @@ cy_rslt_t wifi_extract_credentials(const uint8_t *data, uint32_t data_len, cy_ht
 
     if (!strncmp("SSID", buffer, 4))
     {
+        //reset the array before storing new details
+        memset(wifi_ssid,0x00,WIFI_SSID_LEN);
+        memset(wifi_pwd,0x00,WIFI_PWD_LEN);
+
         /* Extract SSID and Password - skip to SSID*/
         while ((buffer[buff_index++] != EQUALS_OPERATOR_ASCII_VALUE))
             ;
@@ -550,15 +556,23 @@ cy_rslt_t wifi_extract_credentials(const uint8_t *data, uint32_t data_len, cy_ht
         ERR_INFO(("Failed to send the HTTP POST response.\n"));
     }
 
+    storeWIFICredEEPROM(wifi_ssid,WIFI_SSID_LEN,wifi_pwd,WIFI_PWD_LEN);
+
     result = start_sta_mode();
 
     printf("============================================================\n");
          	printf("ModusToolbox-Level3-WiFi - 4B: POST to httpbin.org\n");
         	printf("============================================================\n\n");
 
-    xTaskCreate(flowmeter_logger, "flowlogger_task", HTTP_CLIENT_TASK_STACK_SIZE, NULL, HTTP_CLIENT_TASK_PRIORITY, &flowmeter_handle);
+    if(taskCreated == false)
+    {
+    	xTaskCreate(flowmeter_logger, "flowlogger_task", HTTP_CLIENT_TASK_STACK_SIZE, NULL, HTTP_CLIENT_TASK_PRIORITY, &flowmeter_handle);
 
-    xTaskCreate(alarm_task, "alarm_task", HTTP_CLIENT_TASK_STACK_SIZE, NULL, HTTP_CLIENT_TASK_PRIORITY, &alarmtask_handle);
+    	xTaskCreate(alarm_task, "alarm_task", HTTP_CLIENT_TASK_STACK_SIZE, NULL, HTTP_CLIENT_TASK_PRIORITY, &alarmtask_handle);
+
+    	taskCreated = true;
+    }
+
 
     if (CY_RSLT_SUCCESS != result)
     {
@@ -979,6 +993,22 @@ void server_task(void *arg)
 
     display_configuration();
     
+    loadWIFICredEEPROM(wifi_ssid,WIFI_SSID_LEN,wifi_pwd,WIFI_PWD_LEN);
+
+    if(wifi_ssid[0] != 0x00)	//if there is already credentials loaded from EEPROM, then use it and connect
+    {
+    	result = start_sta_mode();
+
+        if(taskCreated == false)
+        {
+        	xTaskCreate(flowmeter_logger, "flowlogger_task", HTTP_CLIENT_TASK_STACK_SIZE, NULL, HTTP_CLIENT_TASK_PRIORITY, &flowmeter_handle);
+
+        	xTaskCreate(alarm_task, "alarm_task", HTTP_CLIENT_TASK_STACK_SIZE, NULL, HTTP_CLIENT_TASK_PRIORITY, &alarmtask_handle);
+
+        	taskCreated = true;
+        }
+    }
+
     /* Waits for queue message to register a new HTTP page resource.*/
     while (true)
     {

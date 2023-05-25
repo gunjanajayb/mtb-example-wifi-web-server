@@ -77,7 +77,9 @@ VERBOSE=
 
 # Uncomment below DEFINES if you may use TFT feature on one of those boards: 
 # CY8CKIT-062-WIFI-BT, CYW9P62S1-43438EVB-01, CY8CKIT-062S2-43012.
-DEFINES+=ENABLE_TFT
+# DEFINES+=ENABLE_TFT
+DEFINES += HTTP_DO_NOT_USE_CUSTOM_CONFIG
+DEFINES += DEBUG_ENABLE
 
 # Enable optional code that is ordinarily disabled by default.
 #

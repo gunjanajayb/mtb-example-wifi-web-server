@@ -37,11 +37,13 @@
  * Macros
  ******************************************************************************/
 /* Logical Size of Emulated EEPROM in bytes. */
-int LOGICAL_EEPROM_SIZE=250;
-
-
+#define LOGICAL_EEPROM_SIZE		(250u)
 
 #define LOGICAL_EEPROM_START    (0u)
+
+#define CNDATA_EE_STORAGE_START	(8u)
+
+#define WIFI_CRED_EE_START  	CNDATA_EE_STORAGE_START + 24
 
 /* Location of reset counter in Em_EEPROM. */
 #define RESET_COUNT_LOCATION    (13u)
@@ -299,18 +301,32 @@ void handle_error(void)
 #define FALSE false
 /////////////////////////////////////   HTTP Client End /////////////////////////////////////////////////
 
-char save_response[250];
-char save_memory[250];
+char save_response[LOGICAL_EEPROM_SIZE];
+char save_memory[LOGICAL_EEPROM_SIZE];
 int year = 0, month = 0, day = 0, hour = 0, minute = 0, sec = 0;
+int sYear = 0, sMonth = 0, sDay = 0, sHour = 0, sMinute =0, sSec = 0;
 int current_day=0, current_month=0, current_year=0, current_sec=0, current_min=0, current_hour=0;
 uint8_t control_status = 0;
 
 bool updateEEPROM_flag = FALSE;
-bool updateRTC_flag = FALSE;
 bool control_flag = FALSE;
 bool booting = TRUE;
 bool update_inprog = FALSE;
 bool alarm_hit = FALSE;
+
+struct control_data_ee{
+	uint32_t	year;
+	uint32_t	month;
+	uint32_t	day;
+	uint32_t	hour;
+	uint32_t	minute;
+	uint32_t	control;
+};
+
+struct wifi_cred_ee{
+	char ssid[32];
+	char psk[64];
+};
 
 static void getyear(char *value,int *year)
 {
@@ -380,20 +396,6 @@ static void getminute(char* value,int *minute)
 		sum = (sum * 10) + k;
 	}
 	*minute = sum;
-}
-
-static void getsecond(char* value,int *second)
-{
-	int i = 0;
-	int sum = 0;
-	int k = 0;
-
-	for(i = 6; i < 8;i++)
-	{
-		k = value[i] - 0x30;
-		sum = (sum * 10) + k;
-	}
-	*second = sum;
 }
 
 static void HandleError(uint32_t status, char *message)
@@ -487,7 +489,6 @@ static cy_rslt_t parse_json_snippet_callback (cy_JSON_object_t* json_object, voi
 	int lday = 0;
 	int lhour = 0;
 	int lminute = 0;
-	int lsec = 0;
 	char lcntrl[4] = {0};
 	uint8_t lcntrl_stat = 0;
 
@@ -513,40 +514,41 @@ static cy_rslt_t parse_json_snippet_callback (cy_JSON_object_t* json_object, voi
 				{
 					if(lyear != year || lmonth != month || lday != day)
 					{
-						hour = lhour;minute = lminute;sec = lsec;
+						year = lyear;month = lmonth;day = lday;
 						updateEEPROM_flag = TRUE;
 					}
 				}
 
+#ifdef DEBUG_ENABLE
 				printf("year %d\n",lyear);
 				printf("month %d\n",lmonth);
 				printf("day %d\n",lday);
 				printf("\r\n");
+#endif
 			}
 
 			if((strncmp(json_object->object_string, "device_time", strlen("device_time")) == 0))
 			{
 				gethour(json_object->value,&lhour);
 				getminute(json_object->value,&lminute);
-				getsecond(json_object->value,&lsec);
 
 				if(booting == TRUE)
 				{
-					hour = lhour;minute = lminute;sec = lsec;
+					hour = lhour;minute = lminute;
 				}
 				else
 				{
-					if(lhour != hour || lminute != minute || lsec != sec)
+					if(lhour != hour || lminute != minute)
 					{
-						hour = lhour;minute = lminute;sec = lsec;
+						hour = lhour;minute = lminute;
 						updateEEPROM_flag = TRUE;
 					}
 				}
-
+#ifdef DEBUG_ENABLE
 				printf("hour %d\n",lhour);
 				printf("minute %d\n",lminute);
-				printf("sec %d\n",lsec);
 				printf("\r\n");
+#endif
 			}
 
 			if((strncmp(json_object->object_string, "device_status", strlen("device_status")) == 0))
@@ -601,53 +603,61 @@ static cy_rslt_t parse_json_snippet_callback (cy_JSON_object_t* json_object, voi
 #endif
 			if((strncmp(json_object->object_string, "seconds", strlen("seconds")) == 0))
 			{
-				current_sec = (int)json_object->intval;
+				sSec = (int)json_object->intval;
 			}
 
 			if((strncmp(json_object->object_string, "minutes", strlen("minutes")) == 0))
 			{
-				current_min = (int)json_object->intval;
+				sMinute = (int)json_object->intval;
 			}
 
 			if((strncmp(json_object->object_string, "hours", strlen("hours")) == 0))
 			{
-				current_hour = (int)json_object->intval;
+				sHour = (int)json_object->intval;
 			}
 
 			if((strncmp(json_object->object_string, "mday", strlen("mday")) == 0))
 			{
-				current_day = (int)json_object->intval;
+				sDay = (int)json_object->intval;
 			}
 
 			if((strncmp(json_object->object_string, "mon", strlen("mon")) == 0))
 			{
-				current_month = (int)json_object->intval;
+				sMonth = (int)json_object->intval;
 			}
 
 			if((strncmp(json_object->object_string, "year", strlen("year")) == 0))
 			{
-				current_year = (int)json_object->intval;
+				sYear = (int)json_object->intval;
 			}
 			break;
 		}
 		case JSON_FLOAT_TYPE:
 		{
+#ifdef DEBUG_ENABLE
 			printf("Found a float: %f\n",json_object->floatval);
+#endif
 			break;
 		}
 		case JSON_BOOLEAN_TYPE:
 		{
+#ifdef DEBUG_ENABLE
 			printf("Found a boolean: %d\n",(unsigned int)json_object->boolval);
+#endif
 			break;
 		}
 		case JSON_NULL_TYPE:
 		{
+#ifdef DEBUG_ENABLE
 			printf("Found a NULL type: %.*s\n", json_object->value_length,json_object->value);
+#endif
 			break;
 		}
 		case JSON_ARRAY_TYPE:
 		{
+#ifdef DEBUG_ENABLE
 			printf("Found an ARRAY\n");
+#endif
 			break;
 		}
 		default:
@@ -706,9 +716,15 @@ static void init_RTC(struct tm *date_time)
 		handle_error();
 	}
 
+#if 0
+#ifdef DEBUG_ENABLE
 	printf("RTC init\r\n");
+#endif
 	strftime(buffer, sizeof(buffer), "%c", date_time);
+#ifdef DEBUG_ENABLE
 	printf("\r%s\n\n", buffer);
+#endif
+#endif
 }
 
 
@@ -722,7 +738,7 @@ static cy_rslt_t http_client_create(cy_http_client_t* handle,cy_awsport_server_i
 	res = cy_http_client_init();
 	if( res != CY_RSLT_SUCCESS )
 	{
-#ifdef FYI_ENABLE		
+#ifdef DEBUG_ENABLE
 		printf("HTTP Client Library Initialization Failed!\n");
 #endif		
 		return res;
@@ -734,12 +750,12 @@ static cy_rslt_t http_client_create(cy_http_client_t* handle,cy_awsport_server_i
 		res = cy_http_client_deinit();
 		if( res != CY_RSLT_SUCCESS )
 		{
-#ifdef FYI_ENABLE			
+#ifdef DEBUG_ENABLE
 			printf("cy_http_client_deinit Failed!\n");
 #endif			
 			return res;
 		}		
-#ifdef FYI_ENABLE		
+#ifdef DEBUG_ENABLE
 		printf("HTTP Client Creation Failed!\n");
 #endif		
 		return res;
@@ -824,6 +840,7 @@ static cy_rslt_t get_http_response(cy_http_client_t handle, char* req_body, int 
 
 	}
 
+#ifdef DEBUG_ENABLE
 	printf("\nResponse received from HTTP Client:\n");
 
 	for(int i = 0; i < response.body_len; i++)
@@ -831,6 +848,7 @@ static cy_rslt_t get_http_response(cy_http_client_t handle, char* req_body, int 
 		printf("%c", response.body[i]);
 	}
 	printf("\n");
+#endif
 
 	if(isSave)
 	{
@@ -868,26 +886,30 @@ static void updateRTC()
 	char buffer[STRING_BUFFER_SIZE] = {0};
 	struct tm new_time = {0};
 
-	if (validate_date_time(current_sec, current_min, current_hour, current_day, current_month, current_year))
+	if (validate_date_time(sSec, sMinute, sHour, sDay, sMonth, sYear))
 	{
-		new_time.tm_sec = current_sec;
-		new_time.tm_min = current_min;
-		new_time.tm_hour = current_hour;
-		new_time.tm_mday = current_day;
-		new_time.tm_mon = current_month - 1;
-		new_time.tm_year = current_year - TM_YEAR_BASE;
+		new_time.tm_sec = sSec;
+		new_time.tm_min = sMinute;
+		new_time.tm_hour = sHour;
+		new_time.tm_mday = sDay;
+		new_time.tm_mon = sMonth - 1;
+		new_time.tm_year = sYear - TM_YEAR_BASE;
 		//new_time.tm_wday = get_day_of_week(mday, month, year);
 
 		rslt = cyhal_rtc_write(&rtc_obj, &new_time);
 		if (CY_RSLT_SUCCESS == rslt)
 		{
+#ifdef DEBUG_ENABLE
 			printf("\rRTC time updated\r\n\n");
+#endif
 			strftime(buffer, sizeof(buffer), "%c", &new_time);
+#ifdef DEBUG_ENABLE
 			printf("\r%s\n\n", buffer);
+#endif
 		}
 		else
 		{
-			printf("error %d\n",rslt);
+			printf("error %d\n",(int)rslt);
 			handle_error();
 		}
 	}
@@ -898,17 +920,20 @@ static void updateRTC()
 	}
 }
 
-static void updateEEPROM()
+static void updateControlDetailsToEE()
 {
 	cy_en_em_eeprom_status_t eepromReturnValue;
-	uint8_t eepromReadArray[LOGICAL_EEPROM_SIZE];
-	uint8_t eepromWriteArray[LOGICAL_EEPROM_SIZE];
-	int i =0, j =0;
+	char eepromReadArray[LOGICAL_EEPROM_SIZE];
+	char eepromWriteArray[LOGICAL_EEPROM_SIZE];
+	struct control_data_ee cd_ee;
+	int i =0;
 
 	memset(eepromReadArray,0x00,LOGICAL_EEPROM_SIZE);
 	memset(eepromWriteArray,0x00,LOGICAL_EEPROM_SIZE);
 
-	printf("EmEEPROM demo \r\n");
+#ifdef DEBUG_ENABLE
+	printf("updateControlDetailsToEE \r\n");
+#endif
 
 	/* Initialize the flash start address in EEPROM configuration structure. */
 #if ((defined(TARGET_CY8CKIT_064B0S2_4343W)||(defined(TARGET_CY8CPROTO_064B0S3))) && (USER_FLASH == FLASH_REGION_TO_USE ))
@@ -920,22 +945,34 @@ static void updateEEPROM()
 	eepromReturnValue = Cy_Em_EEPROM_Init(&Em_EEPROM_config, &Em_EEPROM_context);
 	HandleError(eepromReturnValue, "Emulated EEPROM Initialization Error \r\n");
 
-	/* Read 15 bytes out of EEPROM memory. */
-	eepromReturnValue = Cy_Em_EEPROM_Read(LOGICAL_EEPROM_START, eepromReadArray,
-											LOGICAL_EEPROM_SIZE, &Em_EEPROM_context);
-	HandleError(eepromReturnValue, "Emulated EEPROM Read failed \r\n");
+	read_eeprom(eepromWriteArray,LOGICAL_EEPROM_SIZE);	//read first whole data
 
+#ifdef DEBUG_ENABLE
 	printf("prev\r\n");
 	for(i = 0; i < LOGICAL_EEPROM_SIZE ; i++){
-		printf("%c",eepromReadArray[i]);
+		printf("%x ",eepromReadArray[i]);
 	}
 	printf("\r\n");
+#endif
 
-	read_ID((char*)eepromWriteArray,8);	//read device ID from EEPROM
+	//save details in eeprom
+	cd_ee.control = control_status;
+	cd_ee.year = year;
+	cd_ee.month = month;
+	cd_ee.day = day;
+	cd_ee.hour = hour;
+	cd_ee.minute = minute;
 
-    for(i = 8, j =0; i < LOGICAL_EEPROM_SIZE; i++, j++){
-    	eepromWriteArray[i] = (uint8_t)save_response[j];
-    }
+	//copy control data to eeprom write array
+	memcpy(&eepromWriteArray[CNDATA_EE_STORAGE_START],(char*)&cd_ee,sizeof(cd_ee));
+
+#ifdef DEBUG_ENABLE
+	printf("Before write\r\n");
+	for(i = 0; i < LOGICAL_EEPROM_SIZE ; i++){
+		printf("%x ",eepromWriteArray[i]);
+	}
+	printf("\r\n");
+#endif
 
 	/* Write initial data to EEPROM. */
 	eepromReturnValue = Cy_Em_EEPROM_Write(LOGICAL_EEPROM_START,
@@ -947,43 +984,127 @@ static void updateEEPROM()
 	//////////////////////////////////////////////////////////////////////////////////////
 
 	/* Read contents of EEPROM after write. */
-	printf("after\r\n");
 	eepromReturnValue = Cy_Em_EEPROM_Read(LOGICAL_EEPROM_START,
 											eepromReadArray, LOGICAL_EEPROM_SIZE,
 											&Em_EEPROM_context);
 	HandleError(eepromReturnValue, "Emulated EEPROM Read failed \r\n" );
 
+#ifdef DEBUG_ENABLE
+	printf("after\r\n");
 	for(i = 0; i < LOGICAL_EEPROM_SIZE ; i++){
-		printf("%c",eepromReadArray[i]);
+		printf("%x ",eepromReadArray[i]);
 	}
 	printf("\r\n");
+#endif
+}
+
+void loadWIFICredEEPROM(char* ssid, int ssid_len, char* pwd, int pwd_len)
+{
+	cy_en_em_eeprom_status_t eepromReturnValue;
+	char eepromReadArray[LOGICAL_EEPROM_SIZE];
+	int i =0;
+
+	memset(eepromReadArray,0x00,LOGICAL_EEPROM_SIZE);
+
+#ifdef DEBUG_ENABLE
+	printf("loadWIFICredEEPROM\r\n");
+#endif
+
+		/* Initialize the flash start address in EEPROM configuration structure. */
+	#if ((defined(TARGET_CY8CKIT_064B0S2_4343W)||(defined(TARGET_CY8CPROTO_064B0S3))) && (USER_FLASH == FLASH_REGION_TO_USE ))
+		Em_EEPROM_config.userFlashStartAddr = (uint32_t) APP_DEFINED_EM_EEPROM_LOCATION_IN_FLASH;
+	#else
+		Em_EEPROM_config.userFlashStartAddr = (uint32_t) EepromStorage;
+	#endif
+
+		eepromReturnValue = Cy_Em_EEPROM_Init(&Em_EEPROM_config, &Em_EEPROM_context);
+		HandleError(eepromReturnValue, "Emulated EEPROM Initialization Error \r\n");
+
+		read_eeprom(eepromReadArray,LOGICAL_EEPROM_SIZE);	//read device ID from EEPROM
+
+		memcpy(ssid,&eepromReadArray[WIFI_CRED_EE_START],ssid_len);
+		memcpy(pwd,&eepromReadArray[WIFI_CRED_EE_START+ssid_len],pwd_len);
+
+#ifdef DEBUG_ENABLE
+		printf("load SSID\n");
+		for(i = 0; i < ssid_len ; i++){
+			printf("%x ",ssid[i]);
+		}
+		printf("\r\n");
+
+		printf("load PWD\n");
+		for(i = 0; i < pwd_len ; i++){
+			printf("%x ",pwd[i]);
+		}
+		printf("\r\n");
+#endif
 
 }
 
-void alarm_task(void *arg){
+void storeWIFICredEEPROM(char* ssid, int ssid_len, char* pwd, int pwd_len)
+{
+	cy_en_em_eeprom_status_t eepromReturnValue;
+	char eepromReadArray[LOGICAL_EEPROM_SIZE];
+	char eepromWriteArray[LOGICAL_EEPROM_SIZE];
+	int i =0;
 
+	memset(eepromReadArray,0x00,LOGICAL_EEPROM_SIZE);
+	memset(eepromWriteArray,0x00,LOGICAL_EEPROM_SIZE);
+
+#ifdef DEBUG_ENABLE
+	printf("storeWIFICredEEPROM\r\n");
+#endif
+
+		/* Initialize the flash start address in EEPROM configuration structure. */
+	#if ((defined(TARGET_CY8CKIT_064B0S2_4343W)||(defined(TARGET_CY8CPROTO_064B0S3))) && (USER_FLASH == FLASH_REGION_TO_USE ))
+		Em_EEPROM_config.userFlashStartAddr = (uint32_t) APP_DEFINED_EM_EEPROM_LOCATION_IN_FLASH;
+	#else
+		Em_EEPROM_config.userFlashStartAddr = (uint32_t) EepromStorage;
+	#endif
+
+		eepromReturnValue = Cy_Em_EEPROM_Init(&Em_EEPROM_config, &Em_EEPROM_context);
+		HandleError(eepromReturnValue, "Emulated EEPROM Initialization Error \r\n");
+
+		read_eeprom(eepromWriteArray,WIFI_CRED_EE_START);	//read device ID from EEPROM
+
+#ifdef DEBUG_ENABLE
+		printf("before 1\r\n");
+		for(i = 0; i < LOGICAL_EEPROM_SIZE ; i++){
+			printf("%x ",eepromWriteArray[i]);
+		}
+		printf("\r\n");
+#endif
+
+		memcpy(&eepromWriteArray[WIFI_CRED_EE_START],ssid,ssid_len);
+		memcpy(&eepromWriteArray[WIFI_CRED_EE_START+ssid_len],pwd,pwd_len);
+
+		eepromReturnValue = Cy_Em_EEPROM_Write(LOGICAL_EEPROM_START,
+												eepromWriteArray,
+												LOGICAL_EEPROM_SIZE,
+												&Em_EEPROM_context);
+		HandleError(eepromReturnValue, "Emulated EEPROM Write failed \r\n");
+
+		/* Read contents of EEPROM after write. */
+		eepromReturnValue = Cy_Em_EEPROM_Read(LOGICAL_EEPROM_START,
+												eepromReadArray, LOGICAL_EEPROM_SIZE,
+												&Em_EEPROM_context);
+		HandleError(eepromReturnValue, "Emulated EEPROM Read failed \r\n" );
+
+#ifdef DEBUG_ENABLE
+		printf("after\r\n");
+		for(i = 0; i < LOGICAL_EEPROM_SIZE ; i++){
+			printf("%x ",eepromReadArray[i]);
+		}
+		printf("\r\n");
+#endif
+}
+
+static void getTimeFromServer()
+{
 	cy_rslt_t rslt;
 	cy_awsport_server_info_t server_info;
-	cy_http_client_t handle;	
-	struct tm date_time;
-	char devID[10] = {0};
+	cy_http_client_t handle;
 	char req_body[256];
-	char stat[2][4] = {"ON","OFF"};
-	bool gpiostate = 0;
-
-	memset(req_body,0x00,256);
-
-    init_relay();	//initialize GPIO for relay control
-
-    //Give some delay for flowmeter_logger task to write device ID in Flash
-    //This is temporary and it will be removed when device ID is stored in EEPROM
-    cyhal_system_delay_ms(10000);
-
-	read_ID(devID,8);	//read device ID from EEPROM
-
-	gpiostate = cyhal_gpio_read(RELAY_PIN);		//take initial state of Relay
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    //Get server time for RTC
 
     memset(save_memory,0x00,LOGICAL_EEPROM_SIZE);	//reset JASON parser array before getting data
     memset(save_response,0x00,LOGICAL_EEPROM_SIZE);
@@ -1010,33 +1131,30 @@ void alarm_task(void *arg){
 		printf("error delete_http_client\r\n");
 	}
 
-	memcpy(save_memory,save_response,250);		//update save_memory array with response
+	memcpy(save_memory,save_response,LOGICAL_EEPROM_SIZE);		//update save_memory array with response
 
 	json_parser_snippet();
 
-	printf("current_year %d\n",current_year);
-	printf("current_month %d\n",current_month);
-	printf("current_day %d\n",current_day);
-	printf("current_hour %d\n",current_hour);
-	printf("current_minute %d\n",current_min);
-	printf("current_sec %d\n",current_sec);
+#ifdef DEBUG_ENABLE
+	printf("server_year %d\n",sYear);
+	printf("server_month %d\n",sMonth);
+	printf("server_day %d\n",sDay);
+	printf("server_hour %d\n",sHour);
+	printf("server_minute %d\n",sMinute);
+	printf("server_sec %d\n",sSec);
 	printf("\r\n");
+#endif
+}
 
-	memset(&date_time, 0x00,sizeof(date_time));
-	init_RTC(&date_time);
+static void httpRequestResponse()
+{
+	cy_rslt_t rslt;
+	cy_awsport_server_info_t server_info;
+	cy_http_client_t handle;
+	char req_body[256];
+	char devID[10] = {0};
 
-	//this function will update RTC time to what we got from server
-	updateRTC();
-
-	//give some delay
-	cyhal_system_delay_ms(2000);
-
-//////////////////////////////////////////////////////////////////////////////////////////////////////////////
-	//get all details
-
-    memset(save_memory,0x00,LOGICAL_EEPROM_SIZE);	//reset JASON parser array before getting data
-    memset(save_response,0x00,LOGICAL_EEPROM_SIZE);
-
+	memset(req_body,0x00,256);
 	//create client
 	rslt = http_client_create(&handle, &server_info);
 	if(rslt != CY_RSLT_SUCCESS)
@@ -1045,7 +1163,7 @@ void alarm_task(void *arg){
 	}
 
 	//get time by creating HTTP request
-	read_ID(devID,8);	//read device ID from EEPROM
+	read_eeprom(devID,8);	//read device ID from EEPROM
 	sprintf(req_body,"action=GET_ALL&DEVICE_ID=%s",devID);
 	rslt = get_http_response(handle,req_body,strlen(req_body),TRUE);
 	if(rslt != CY_RSLT_SUCCESS)
@@ -1059,27 +1177,138 @@ void alarm_task(void *arg){
 	{
 		printf("error delete_http_client\r\n");
 	}
+}
 
-	memcpy(save_memory,save_response,250);		//update save_memory array with response
+static void getControlDetails()
+{
+	char tempEE[LOGICAL_EEPROM_SIZE];
+	int i = 0;
+	struct control_data_ee cd_ee;
 
-	json_parser_snippet();
+    memset(save_memory,0x00,LOGICAL_EEPROM_SIZE);	//reset JASON parser array before getting data
+    memset(save_response,0x00,LOGICAL_EEPROM_SIZE);
 
-	//save deadline time and control info to EEPROM
-	updateEEPROM();
+    httpRequestResponse();
 
-	//this control_status variable is updated in json parsing function.
-	//take action according to its value
+	memcpy(save_memory,save_response,LOGICAL_EEPROM_SIZE);		//update save_memory array with response
+
+	//if parsing is success, then store the data to EEPROM, if failed, update the control details with
+	//whatever there in EEPROM
+	if(json_parser_snippet() == 0)
+	{
+#ifdef DEBUG_ENABLE
+		printf("json parsing pass\n");
+#endif
+		//save deadline time and control info to EEPROM
+		updateControlDetailsToEE();
+	}
+	else
+	{
+#ifdef DEBUG_ENABLE
+		printf("json parsing failed\n");
+#endif
+		//in case if the response is not proper from server, copy data from EEPROM and parse
+		memset(tempEE,0x00,LOGICAL_EEPROM_SIZE);
+		read_eeprom(tempEE,LOGICAL_EEPROM_SIZE);
+
+#ifdef DEBUG_ENABLE
+		for(i = 0; i < LOGICAL_EEPROM_SIZE ; i++){
+			printf("%x ",tempEE[i]);
+		}
+
+		printf("\r\n");
+#endif
+
+		memset((char*)&cd_ee,0x00,sizeof(cd_ee));
+		memcpy((char*)&cd_ee,&tempEE[CNDATA_EE_STORAGE_START],sizeof(cd_ee));
+
+		year = cd_ee.year;
+		month = cd_ee.month;
+		day = cd_ee.day;
+		hour = cd_ee.hour;
+		minute = cd_ee.minute;
+		control_status = cd_ee.control;
+
+#ifdef DEBUG_ENABLE
+		printf("ee_year %d\n",year);
+		printf("ee_month %d\n",month);
+		printf("ee_day %d\n",day);
+		printf("ee_hour %d\n",hour);
+		printf("ee_minute %d\n",minute);
+		printf("ee_control %d\n",control_status);
+		printf("\r\n");
+#endif
+
+	}
+}
+
+static void checkAndUpdateRTC()
+{
+	struct tm date_time;
+	//Compare the server time with Current RTC time on module. If mismatch then update RTC time with server time
+	//If server time receive is '0' then do not update RTC
+	memset(&date_time, 0x00,sizeof(date_time));
+	init_RTC(&date_time);
+
+	//update RTC only if the server time is mismatched or it is all 00
+	if((((date_time.tm_year + TM_YEAR_BASE) == sYear) && ((date_time.tm_mon + 1) == sMonth) && (date_time.tm_mday== sDay )&& (date_time.tm_hour == sHour )&& (date_time.tm_min == sMinute))
+		|| ((sYear == 0) && (sMonth == 0) && (sDay == 0) && (sHour == 0) && (sMinute == 0) && (sSec == 0)))
+	{
+#ifdef DEBUG_ENABLE
+		printf("No RTC update\n");
+#endif
+	}
+	else
+	{
+		//this function will update RTC time to what we got from server
+		updateRTC();
+	}
+}
+
+static void updateRelayState()
+{
 	if(control_status == 1)
 	{
 		cyhal_gpio_write(RELAY_PIN, CYBSP_LED_STATE_OFF);
+#ifdef DEBUG_ENABLE
 		printf("LED OFF\n");
+#endif
 	}
 	else
 	{
 		cyhal_gpio_write(RELAY_PIN, CYBSP_LED_STATE_ON);
+#ifdef DEBUG_ENABLE
 		printf("LED ON\n");
+#endif
 	}
+}
 
+void alarm_task(void *arg){
+
+    init_relay();	//initialize GPIO for relay control
+
+    //Give some delay for flowmeter_logger task to write device ID in Flash
+    //This is temporary and it will be removed when device ID is stored in EEPROM
+    cyhal_system_delay_ms(10000);
+
+	cyhal_gpio_read(RELAY_PIN);		//take initial state of Relay
+
+    //Get server time for RTC
+	getTimeFromServer();
+
+	//update RTC if server time and RTC time mismatch
+	checkAndUpdateRTC();
+
+	//give some delay
+	cyhal_system_delay_ms(2000);
+
+	//get deadline and status from server
+	getControlDetails();
+
+	//based on the control status, update relay GPIO condition
+	updateRelayState();
+
+	//Mark this flag as false for next deadline/control data to be properly updated in case of mismatch
 	booting = FALSE;
 
 	//This task's job is to check whether deadline is hit or not and take action accordingly
@@ -1091,55 +1320,32 @@ void alarm_task(void *arg){
 
 		memset(save_memory,0x00,LOGICAL_EEPROM_SIZE);	//reset JASON parser array before getting data
 		memset(save_response,0x00,LOGICAL_EEPROM_SIZE);
-		//create client
-		rslt = http_client_create(&handle, &server_info);
-		if(rslt != CY_RSLT_SUCCESS)
-		{
-			printf("error http_client_create\r\n");
-		}
 
-		//get time by creating HTTP request
-		read_ID(devID,8);	//read device ID from EEPROM
-		sprintf(req_body,"action=GET_ALL&DEVICE_ID=%s",devID);
-		rslt = get_http_response(handle,req_body,strlen(req_body),TRUE);
-		if(rslt != CY_RSLT_SUCCESS)
-		{
-			printf("error get_http_response\r\n");
-		}
-
-		//delete http client
-		rslt = delete_http_client(handle);
-		if(rslt != CY_RSLT_SUCCESS)
-		{
-			printf("error delete_http_client\r\n");
-		}
+		httpRequestResponse();
 
 		update_inprog = TRUE;
 
-		memcpy(save_memory,save_response,250);		//update save_memory array with response
+		memcpy(save_memory,save_response,LOGICAL_EEPROM_SIZE);		//update save_memory array with response
 
 		json_parser_snippet();
 
 		if(updateEEPROM_flag == TRUE)
 		{
-			printf("updateEEPROM\n");
+#ifdef DEBUG_ENABLE
+			printf("updateControlDetailsToEE\n");
+#endif
 			updateEEPROM_flag = FALSE;
-			updateEEPROM();
+			updateControlDetailsToEE();
 			alarm_hit = FALSE;
-		}
-
-		if(updateRTC_flag == TRUE)
-		{
-			printf("updateRTC\n");
-			updateRTC_flag = FALSE;
-			updateRTC();
 		}
 
 		update_inprog = FALSE;
 
 		if(control_flag == TRUE)
 		{
+#ifdef DEBUG_ENABLE
 			printf("update control\n");
+#endif
 			control_flag = FALSE;
 			if(control_status == 1)
 			{
@@ -1189,7 +1395,7 @@ void rtc_task(void *arg)
 					}
 
 					//get time by creating HTTP request
-					read_ID(devID,8);	//read device ID from EEPROM
+					read_eeprom(devID,8);	//read device ID from EEPROM
 					sprintf(req_body,"action=UPDATE_CTRL&DEVICE_ID=%s&CONTROL=%s",devID,stat[1]);
 					rslt = get_http_response(handle,req_body,strlen(req_body),FALSE);
 					if(rslt != CY_RSLT_SUCCESS)
@@ -1214,7 +1420,7 @@ void rtc_task(void *arg)
 
 }
 
-void read_ID(char* id, uint8_t len)
+void read_eeprom(char* id, uint8_t len)
 {
 	cy_en_em_eeprom_status_t eepromReturnValue;
 	/* Initialize the flash start address in EEPROM configuration structure. */
