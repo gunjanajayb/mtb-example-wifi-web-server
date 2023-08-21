@@ -62,6 +62,7 @@
 #endif
 
 #include "flowmeter.h"
+#include "eeprom.h"
 /*******************************************************************************
 * Macros
 ******************************************************************************/
@@ -70,9 +71,10 @@
 #define SERVER_TASK_PRIORITY          (1)
 
 /* RTOS related macros. */
-#define FLOWSENSE_TASK_STACK_SIZE        (2 * 1024)
+#define FLOWSENSE_TASK_STACK_SIZE        (4 * 1024)
 #define FLOWSENSE_TASK_PRIORITY          (1)
 
+#define FLOW_QUEUE_SIZE				10
 /*******************************************************************************
 * Global Variables
 ********************************************************************************/
@@ -83,6 +85,8 @@ volatile int uxTopUsedPriority;
 TaskHandle_t server_task_handle;
 TaskHandle_t flowsens_task_handle;
 cyhal_gpio_callback_data_t gpio_btn_callback_data;
+QueueHandle_t flow_eepromQ;
+QueueHandle_t flow_cloudQ;
 /*******************************************************************************
  * Function Name: main
  *******************************************************************************
@@ -123,12 +127,13 @@ int main(void)
 	cyhal_gpio_enable_event(P13_5, CYHAL_GPIO_IRQ_RISE,
 								 GPIO_INTERRUPT_PRIORITY, true);
 
-    /* Enable global interrupts */
-    __enable_irq();
-
     /* Initialize retarget-io to use the debug UART port */
     cy_retarget_io_init(CYBSP_DEBUG_UART_TX, CYBSP_DEBUG_UART_RX, CY_RETARGET_IO_BAUDRATE);
 
+	initEEPROM();
+
+    /* Enable global interrupts */
+    __enable_irq();
 
     #if defined(CY_DEVICE_PSOC6A512K)
         const uint32_t bus_frequency = 50000000lu;
@@ -151,6 +156,8 @@ int main(void)
     xTaskCreate(server_task, "HTTP Web Server", SERVER_TASK_STACK_SIZE, NULL,
                 SERVER_TASK_PRIORITY, &server_task_handle);
 
+    flow_eepromQ = xQueueCreate(FLOW_QUEUE_SIZE,sizeof(float));
+    flow_cloudQ = xQueueCreate(FLOW_QUEUE_SIZE,sizeof(float));
     /* Start the FreeRTOS scheduler */
     vTaskStartScheduler();
 

@@ -64,6 +64,8 @@
 
 #include "alarm.h"
 
+#include "eeprom.h"
+
 /*******************************************************************************
 * Macros
 ********************************************************************************/
@@ -94,6 +96,8 @@ uint32_t newflowrate;
 uint32_t bodyLength;
 volatile int counterpulse_curr = 0;
 volatile int counterpulse_diff = 0;
+extern QueueHandle_t flow_eepromQ;
+extern QueueHandle_t flow_cloudQ;
 
 /*******************************************************************************
  * Function Name: http_client_task
@@ -267,43 +271,32 @@ static cy_rslt_t delete_http_client(cy_http_client_t handle)
 
 void flowmeter_logger(void *arg){
 
-	char eventValue[256];
-	// ADC channel object
-	// Var used for storing conversion result
-	cy_http_client_t handle;
-	cy_awsport_server_info_t server_info;
-	cy_rslt_t res = CY_RSLT_SUCCESS;
 	float adc_out=0;
-	uint32_t bodyLength=0;
 	float newflowrate=0;
 	float flowrate=0;
 	char device_id[10] = {0};
-	char stat[2][4] = {"ON","OFF"};
-	bool gpiostate = 0;
-	int tds = 0;
 	int counter = 0;
-	char devIDtoBeWritten[10] = {"00400215"};
+	uint8_t* ptr;
 
 	//read device ID from EEPROM
-	read_eeprom(&device_id[0],8);
+	readDeviceID((uint8_t*)&device_id[0],8);
+
+	readFlowData((uint8_t*)&flowrate,sizeof(float));
+	ptr=(uint8_t*)&flowrate;
+	if(*ptr == 0xFF &&  *(ptr+1) == 0xFF && *(ptr+2) == 0xFF && *(ptr+3) == 0xFF)
+	{
+		flowrate = 0.0;
+	}
+
+	printf("today flow %f\r\n",flowrate);
 
 #ifdef DEBUG_ENABLE
 	printf("devID 1 %s\n",device_id);
 #endif
 
-	if(device_id[0] != '0')	//write to EEPROM	// this is temporary until flash/EEPROM issue fix
-	{
-#ifdef DEBUG_ENABLE
-		printf("write device ID\n");
-#endif
-		write_ID(devIDtoBeWritten,8);
-	}
-
 	while(1)
 	{
 		counter++;
-
-		res = CY_RSLT_SUCCESS;
 		// Poll the flowmeter once a second
 		cyhal_system_delay_ms(1000);
 
@@ -314,40 +307,16 @@ void flowmeter_logger(void *arg){
 		
 		flowrate = flowrate + newflowrate;
 
+
+		if((counter%10) == 0)	//write flow data on every 10 seconds
+		{
+			xQueueSendToBack(flow_eepromQ,(const void*)&flowrate,pdMS_TO_TICKS(200));
+		}
+
 		if(counter == 60)	//log data to table every 5 minutes
 		{
 			counter = 0;
-			gpiostate = cyhal_gpio_read(RELAY_PIN);
-
-			tds = rand() % 100;
-			sprintf(eventValue, "action=UPDATE_FLOW&device_id=%s&litre=%f&tds=%d&status=%s",device_id,flowrate,tds,stat[gpiostate]);
-		#ifdef DEBUG_ENABLE
-			printf("sending flowrate: %f.\n", flowrate);
-		#endif
-			bodyLength = strlen(eventValue);
-
-			//create client
-			res = http_client_create(&handle, &server_info);
-			if(res != CY_RSLT_SUCCESS)
-			{
-				continue;
-			}
-
-			res = log_flowrate(handle,eventValue,bodyLength);
-			if(res != CY_RSLT_SUCCESS)
-			{
-		#ifdef DEBUG_ENABLE
-				printf("log flow rate failed %d\n",res);
-		#endif
-			}
-
-			res = delete_http_client(handle);
-			if(res != CY_RSLT_SUCCESS)
-			{
-		#ifdef DEBUG_ENABLE
-				printf("delete_http_client failed %d\n",res);
-		#endif
-			}
+			xQueueSendToBack(flow_cloudQ,(const void*)&flowrate,pdMS_TO_TICKS(200));
 		}
 	}
 }
@@ -373,5 +342,74 @@ void disconnect_callback(void *arg){
 void gpio_interrupt_handler(void *handler_arg, cyhal_gpio_event_t event)
 {
 	counterpulse_curr++;
+}
+
+void flow_cloud(void* arg){
+	char eventValue[256];
+	cy_rslt_t res = CY_RSLT_SUCCESS;
+	cy_http_client_t handle;
+	cy_awsport_server_info_t server_info;
+	bool gpiostate = 0;
+	int tds = 0;
+	char stat[2][4] = {"ON","OFF"};
+	char device_id[10] = {0};
+	float flowrate=0;
+	uint32_t bodyLength=0;
+
+	//read device ID from EEPROM
+	readDeviceID((uint8_t*)&device_id[0],8);
+
+	while(1){
+
+		xQueueReceive(flow_cloudQ,(void * const)&flowrate,portMAX_DELAY);
+
+		res = CY_RSLT_SUCCESS;
+
+		gpiostate = cyhal_gpio_read(RELAY_PIN);
+
+#ifdef DEBUG_ENABLE
+printf("sending flowrate: %f.\n", flowrate);
+#endif
+
+		tds = rand() % 100;
+		sprintf(eventValue, "action=UPDATE_FLOW&device_id=%s&litre=%f&tds=%d&status=%s",device_id,flowrate,tds,stat[gpiostate]);
+		bodyLength = strlen(eventValue);
+
+		//create client
+		res = http_client_create(&handle, &server_info);
+		if(res != CY_RSLT_SUCCESS)
+		{
+			continue;
+		}
+
+		res = log_flowrate(handle,eventValue,bodyLength);
+		if(res != CY_RSLT_SUCCESS)
+		{
+	#ifdef DEBUG_ENABLE
+			printf("log flow rate failed %d\n",res);
+	#endif
+		}
+
+		res = delete_http_client(handle);
+		if(res != CY_RSLT_SUCCESS)
+		{
+	#ifdef DEBUG_ENABLE
+			printf("delete_http_client failed %d\n",res);
+	#endif
+		}
+	}
+}
+
+void flow_eeprom(void* arg){
+	float flowrate=0;
+
+	while(1){
+
+		xQueueReceive(flow_eepromQ,(void * const)&flowrate,portMAX_DELAY);
+		writeFlowData((uint8_t*)&flowrate,sizeof(float));
+#if DEBUG_ENABLE
+		printEEPROMContent();
+#endif
+	}
 }
 

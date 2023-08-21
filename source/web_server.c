@@ -76,13 +76,20 @@
 
 #include "alarm.h"
 
+#include "eeprom.h"
+
 /* RTOS related macros. */
 #define HTTP_CLIENT_TASK_STACK_SIZE        (5 * 1024)
 #define HTTP_CLIENT_TASK_PRIORITY          (1)
 
+#define EEPROM_TASK_STACK_SIZE        (5 * 1024)
+#define EEPROM_TASK_PRIORITY          (1)
+
 /* flowmeter_handle task handle. */
 TaskHandle_t flowmeter_handle;
 TaskHandle_t alarmtask_handle;
+TaskHandle_t floweeprom_handle;
+TaskHandle_t flowcloud_handle;
 
 /*******************************************************************************
 * Global Variables
@@ -556,7 +563,14 @@ cy_rslt_t wifi_extract_credentials(const uint8_t *data, uint32_t data_len, cy_ht
         ERR_INFO(("Failed to send the HTTP POST response.\n"));
     }
 
-    storeWIFICredEEPROM(wifi_ssid,WIFI_SSID_LEN,wifi_pwd,WIFI_PWD_LEN);
+    printf("Hello\r\n");
+    printf("%s\r\n",wifi_ssid);
+    printf("%s\r\n",wifi_pwd);
+
+    writeSSID(wifi_ssid,WIFI_SSID_LEN);
+	writePWD(wifi_pwd,WIFI_PWD_LEN);
+
+	printEEPROMContent();
 
     result = start_sta_mode();
 
@@ -564,11 +578,28 @@ cy_rslt_t wifi_extract_credentials(const uint8_t *data, uint32_t data_len, cy_ht
          	printf("ModusToolbox-Level3-WiFi - 4B: POST to httpbin.org\n");
         	printf("============================================================\n\n");
 
+
     if(taskCreated == false)
     {
-    	xTaskCreate(flowmeter_logger, "flowlogger_task", HTTP_CLIENT_TASK_STACK_SIZE, NULL, HTTP_CLIENT_TASK_PRIORITY, &flowmeter_handle);
+    	if(xTaskCreate(flowmeter_logger, "flowlogger_task", HTTP_CLIENT_TASK_STACK_SIZE, NULL, HTTP_CLIENT_TASK_PRIORITY, &flowmeter_handle) == pdFAIL)
+    	{
+    		printf("Task flowlogger_task create failed\r\n");
+    	}
 
-    	xTaskCreate(alarm_task, "alarm_task", HTTP_CLIENT_TASK_STACK_SIZE, NULL, HTTP_CLIENT_TASK_PRIORITY, &alarmtask_handle);
+    	if(xTaskCreate(alarm_task, "alarm_task", HTTP_CLIENT_TASK_STACK_SIZE, NULL, HTTP_CLIENT_TASK_PRIORITY, &alarmtask_handle) == pdFAIL)
+    	{
+    		printf("Task alarm_task create failed\r\n");
+    	}
+
+    	if(xTaskCreate(flow_eeprom, "flow_eeprom", EEPROM_TASK_STACK_SIZE, NULL, EEPROM_TASK_PRIORITY, &floweeprom_handle) == pdFAIL)
+    	{
+    		printf("Task flow_eeprom create failed\r\n");
+    	}
+
+    	if(xTaskCreate(flow_cloud, "flow_cloud", EEPROM_TASK_STACK_SIZE, NULL, EEPROM_TASK_PRIORITY, &flowcloud_handle) == pdFAIL)
+    	{
+    		printf("Task flow_cloud create failed\r\n");
+    	}
 
     	taskCreated = true;
     }
@@ -993,17 +1024,37 @@ void server_task(void *arg)
 
     display_configuration();
     
-    loadWIFICredEEPROM(wifi_ssid,WIFI_SSID_LEN,wifi_pwd,WIFI_PWD_LEN);
+    readSSID(wifi_ssid,WIFI_SSID_LEN);
+    readPWD(wifi_pwd,WIFI_PWD_LEN);
 
-    if(wifi_ssid[0] != 0x00)	//if there is already credentials loaded from EEPROM, then use it and connect
+    printf("server Task\r\n");
+    printEEPROMContent();
+
+    if(wifi_ssid[0] != 0xFF)	//if there is already credentials loaded from EEPROM, then use it and connect
     {
     	result = start_sta_mode();
 
         if(taskCreated == false)
         {
-        	xTaskCreate(flowmeter_logger, "flowlogger_task", HTTP_CLIENT_TASK_STACK_SIZE, NULL, HTTP_CLIENT_TASK_PRIORITY, &flowmeter_handle);
+        	if(xTaskCreate(flowmeter_logger, "flowlogger_task", HTTP_CLIENT_TASK_STACK_SIZE, NULL, HTTP_CLIENT_TASK_PRIORITY, &flowmeter_handle) == pdFAIL)
+        	{
+        		printf("Task flowlogger_task create failed\r\n");
+        	}
 
-        	xTaskCreate(alarm_task, "alarm_task", HTTP_CLIENT_TASK_STACK_SIZE, NULL, HTTP_CLIENT_TASK_PRIORITY, &alarmtask_handle);
+        	if(xTaskCreate(alarm_task, "alarm_task", HTTP_CLIENT_TASK_STACK_SIZE, NULL, HTTP_CLIENT_TASK_PRIORITY, &alarmtask_handle) == pdFAIL)
+        	{
+        		printf("Task alarm_task create failed\r\n");
+        	}
+
+        	if(xTaskCreate(flow_eeprom, "flow_eeprom", EEPROM_TASK_STACK_SIZE, NULL, EEPROM_TASK_PRIORITY, &floweeprom_handle) == pdFAIL)
+        	{
+        		printf("Task flow_eeprom create failed\r\n");
+        	}
+
+        	if(xTaskCreate(flow_cloud, "flow_cloud", EEPROM_TASK_STACK_SIZE, NULL, EEPROM_TASK_PRIORITY, &flowcloud_handle) == pdFAIL)
+        	{
+        		printf("Task flow_cloud create failed\r\n");
+        	}
 
         	taskCreated = true;
         }

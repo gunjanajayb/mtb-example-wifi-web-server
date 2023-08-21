@@ -24,12 +24,11 @@
 /* HTTP Client Library*/
 #include "cy_http_client_api.h"
 
-#include "cy_em_eeprom.h"
-
 #include "cJSON.h"
 
 #include "cy_json_parser.h"
 
+#include "eeprom.h"
 
 /////////////////////////////////////   EEPROM  /////////////////////////////////////////////
 
@@ -104,49 +103,8 @@
 /*******************************************************************************
  * Global variables
  ******************************************************************************/
-/* EEPROM configuration and context structure. */
-cy_stc_eeprom_config_t Em_EEPROM_config =
-{
-        .eepromSize = EEPROM_SIZE,
-        .blockingWrite = BLOCKING_WRITE,
-        .redundantCopy = REDUNDANT_COPY,
-        .wearLevelingFactor = WEAR_LEVELLING_FACTOR,
-};
 
 
-cy_stc_eeprom_context_t Em_EEPROM_context;
-
-#if (EMULATED_EEPROM_FLASH == FLASH_REGION_TO_USE)
-CY_SECTION(".cy_em_eeprom")
-#endif /* #if(FLASH_REGION_TO_USE) */
-CY_ALIGN(CY_EM_EEPROM_FLASH_SIZEOF_ROW)
-
-#if ((defined(TARGET_CY8CKIT_064B0S2_4343W)||(defined(TARGET_CY8CPROTO_064B0S3))) && (USER_FLASH == FLASH_REGION_TO_USE ))
-/* When CY8CKIT-064B0S2-4343W and CY8CPROTO-064B0S3 is selected as the target and EEPROM array is
- * stored in user flash, the EEPROM array is placed in a fixed location in
- * memory. The adddress of the fixed location can be arrived at by determining
- * the amount of flash consumed by the application. In this case, the example
- * consumes approximately 104000 bytes for the above target using GCC_ARM
- * compiler and Debug configuration. The start address specified in the linker
- * script is 0x10000000, providing an offset of approximately 32 KB, the EEPROM
- * array is placed at 0x10021000 in this example. Note that changing the
- * compiler and the build configuration will change the amount of flash
- * consumed. As a resut, you will need to modify the value accordingly. Among
- * the supported compilers and build configurations, the amount of flash
- * consumed is highest for GCC_ARM compiler and Debug build configuration.
- */
-#define APP_DEFINED_EM_EEPROM_LOCATION_IN_FLASH  (0x10021000)
-#else
-/* EEPROM storage in user flash or emulated EEPROM flash. */
-const uint8_t EepromStorage[CY_EM_EEPROM_GET_PHYSICAL_SIZE(EEPROM_SIZE, SIMPLE_MODE, WEAR_LEVELLING_FACTOR, REDUNDANT_COPY)] = {0u};
-
-#endif /* #if (defined(TARGET_CY8CKIT_064B0S2_4343W)) */
-
-/* RAM arrays for holding EEPROM read and write data respectively. */
-
-/////////////////////////////////////   EEPROM  END /////////////////////////////////////////////////////
-
-/////////////////////////////////////   RTC Module  /////////////////////////////////////////////////////
 /*******************************************************************************
 * Macros
 *******************************************************************************/
@@ -315,17 +273,14 @@ bool update_inprog = FALSE;
 bool alarm_hit = FALSE;
 
 struct control_data_ee{
-	uint32_t	year;
-	uint32_t	month;
-	uint32_t	day;
-	uint32_t	hour;
-	uint32_t	minute;
-	uint32_t	control;
-};
-
-struct wifi_cred_ee{
-	char ssid[32];
-	char psk[64];
+	uint16_t	year;
+	uint8_t		month;
+	uint8_t		day;
+	uint8_t		hour;
+	uint8_t		minute;
+	uint8_t		control;
+	uint8_t 	dummy;
+	float		litre;
 };
 
 static void getyear(char *value,int *year)
@@ -396,31 +351,6 @@ static void getminute(char* value,int *minute)
 		sum = (sum * 10) + k;
 	}
 	*minute = sum;
-}
-
-static void HandleError(uint32_t status, char *message)
-{
-
-    if(CY_EM_EEPROM_SUCCESS != status)
-    {
-        if(CY_EM_EEPROM_REDUNDANT_COPY_USED != status)
-        {
-            cyhal_gpio_write((cyhal_gpio_t) CYBSP_USER_LED, false);
-            __disable_irq();
-
-            if(NULL != message)
-            {
-                printf("%s",message);
-            }
-
-            while(1u);
-        }
-        else
-        {
-            printf("%s","Main copy is corrupted. Redundant copy in Emulated EEPROM is used \r\n");
-        }
-
-    }
 }
 
 /*******************************************************************************
@@ -920,185 +850,6 @@ static void updateRTC()
 	}
 }
 
-static void updateControlDetailsToEE()
-{
-	cy_en_em_eeprom_status_t eepromReturnValue;
-	char eepromReadArray[LOGICAL_EEPROM_SIZE];
-	char eepromWriteArray[LOGICAL_EEPROM_SIZE];
-	struct control_data_ee cd_ee;
-	int i =0;
-
-	memset(eepromReadArray,0x00,LOGICAL_EEPROM_SIZE);
-	memset(eepromWriteArray,0x00,LOGICAL_EEPROM_SIZE);
-
-#ifdef DEBUG_ENABLE
-	printf("updateControlDetailsToEE \r\n");
-#endif
-
-	/* Initialize the flash start address in EEPROM configuration structure. */
-#if ((defined(TARGET_CY8CKIT_064B0S2_4343W)||(defined(TARGET_CY8CPROTO_064B0S3))) && (USER_FLASH == FLASH_REGION_TO_USE ))
-	Em_EEPROM_config.userFlashStartAddr = (uint32_t) APP_DEFINED_EM_EEPROM_LOCATION_IN_FLASH;
-#else
-	Em_EEPROM_config.userFlashStartAddr = (uint32_t) EepromStorage;
-#endif
-
-	eepromReturnValue = Cy_Em_EEPROM_Init(&Em_EEPROM_config, &Em_EEPROM_context);
-	HandleError(eepromReturnValue, "Emulated EEPROM Initialization Error \r\n");
-
-	read_eeprom(eepromWriteArray,LOGICAL_EEPROM_SIZE);	//read first whole data
-
-#ifdef DEBUG_ENABLE
-	printf("prev\r\n");
-	for(i = 0; i < LOGICAL_EEPROM_SIZE ; i++){
-		printf("%x ",eepromReadArray[i]);
-	}
-	printf("\r\n");
-#endif
-
-	//save details in eeprom
-	cd_ee.control = control_status;
-	cd_ee.year = year;
-	cd_ee.month = month;
-	cd_ee.day = day;
-	cd_ee.hour = hour;
-	cd_ee.minute = minute;
-
-	//copy control data to eeprom write array
-	memcpy(&eepromWriteArray[CNDATA_EE_STORAGE_START],(char*)&cd_ee,sizeof(cd_ee));
-
-#ifdef DEBUG_ENABLE
-	printf("Before write\r\n");
-	for(i = 0; i < LOGICAL_EEPROM_SIZE ; i++){
-		printf("%x ",eepromWriteArray[i]);
-	}
-	printf("\r\n");
-#endif
-
-	/* Write initial data to EEPROM. */
-	eepromReturnValue = Cy_Em_EEPROM_Write(LOGICAL_EEPROM_START,
-											eepromWriteArray,
-											LOGICAL_EEPROM_SIZE,
-											&Em_EEPROM_context);
-	HandleError(eepromReturnValue, "Emulated EEPROM Write failed \r\n");
-
-	//////////////////////////////////////////////////////////////////////////////////////
-
-	/* Read contents of EEPROM after write. */
-	eepromReturnValue = Cy_Em_EEPROM_Read(LOGICAL_EEPROM_START,
-											eepromReadArray, LOGICAL_EEPROM_SIZE,
-											&Em_EEPROM_context);
-	HandleError(eepromReturnValue, "Emulated EEPROM Read failed \r\n" );
-
-#ifdef DEBUG_ENABLE
-	printf("after\r\n");
-	for(i = 0; i < LOGICAL_EEPROM_SIZE ; i++){
-		printf("%x ",eepromReadArray[i]);
-	}
-	printf("\r\n");
-#endif
-}
-
-void loadWIFICredEEPROM(char* ssid, int ssid_len, char* pwd, int pwd_len)
-{
-	cy_en_em_eeprom_status_t eepromReturnValue;
-	char eepromReadArray[LOGICAL_EEPROM_SIZE];
-	int i =0;
-
-	memset(eepromReadArray,0x00,LOGICAL_EEPROM_SIZE);
-
-#ifdef DEBUG_ENABLE
-	printf("loadWIFICredEEPROM\r\n");
-#endif
-
-		/* Initialize the flash start address in EEPROM configuration structure. */
-	#if ((defined(TARGET_CY8CKIT_064B0S2_4343W)||(defined(TARGET_CY8CPROTO_064B0S3))) && (USER_FLASH == FLASH_REGION_TO_USE ))
-		Em_EEPROM_config.userFlashStartAddr = (uint32_t) APP_DEFINED_EM_EEPROM_LOCATION_IN_FLASH;
-	#else
-		Em_EEPROM_config.userFlashStartAddr = (uint32_t) EepromStorage;
-	#endif
-
-		eepromReturnValue = Cy_Em_EEPROM_Init(&Em_EEPROM_config, &Em_EEPROM_context);
-		HandleError(eepromReturnValue, "Emulated EEPROM Initialization Error \r\n");
-
-		read_eeprom(eepromReadArray,LOGICAL_EEPROM_SIZE);	//read device ID from EEPROM
-
-		memcpy(ssid,&eepromReadArray[WIFI_CRED_EE_START],ssid_len);
-		memcpy(pwd,&eepromReadArray[WIFI_CRED_EE_START+ssid_len],pwd_len);
-
-#ifdef DEBUG_ENABLE
-		printf("load SSID\n");
-		for(i = 0; i < ssid_len ; i++){
-			printf("%x ",ssid[i]);
-		}
-		printf("\r\n");
-
-		printf("load PWD\n");
-		for(i = 0; i < pwd_len ; i++){
-			printf("%x ",pwd[i]);
-		}
-		printf("\r\n");
-#endif
-
-}
-
-void storeWIFICredEEPROM(char* ssid, int ssid_len, char* pwd, int pwd_len)
-{
-	cy_en_em_eeprom_status_t eepromReturnValue;
-	char eepromReadArray[LOGICAL_EEPROM_SIZE];
-	char eepromWriteArray[LOGICAL_EEPROM_SIZE];
-	int i =0;
-
-	memset(eepromReadArray,0x00,LOGICAL_EEPROM_SIZE);
-	memset(eepromWriteArray,0x00,LOGICAL_EEPROM_SIZE);
-
-#ifdef DEBUG_ENABLE
-	printf("storeWIFICredEEPROM\r\n");
-#endif
-
-		/* Initialize the flash start address in EEPROM configuration structure. */
-	#if ((defined(TARGET_CY8CKIT_064B0S2_4343W)||(defined(TARGET_CY8CPROTO_064B0S3))) && (USER_FLASH == FLASH_REGION_TO_USE ))
-		Em_EEPROM_config.userFlashStartAddr = (uint32_t) APP_DEFINED_EM_EEPROM_LOCATION_IN_FLASH;
-	#else
-		Em_EEPROM_config.userFlashStartAddr = (uint32_t) EepromStorage;
-	#endif
-
-		eepromReturnValue = Cy_Em_EEPROM_Init(&Em_EEPROM_config, &Em_EEPROM_context);
-		HandleError(eepromReturnValue, "Emulated EEPROM Initialization Error \r\n");
-
-		read_eeprom(eepromWriteArray,WIFI_CRED_EE_START);	//read device ID from EEPROM
-
-#ifdef DEBUG_ENABLE
-		printf("before 1\r\n");
-		for(i = 0; i < LOGICAL_EEPROM_SIZE ; i++){
-			printf("%x ",eepromWriteArray[i]);
-		}
-		printf("\r\n");
-#endif
-
-		memcpy(&eepromWriteArray[WIFI_CRED_EE_START],ssid,ssid_len);
-		memcpy(&eepromWriteArray[WIFI_CRED_EE_START+ssid_len],pwd,pwd_len);
-
-		eepromReturnValue = Cy_Em_EEPROM_Write(LOGICAL_EEPROM_START,
-												eepromWriteArray,
-												LOGICAL_EEPROM_SIZE,
-												&Em_EEPROM_context);
-		HandleError(eepromReturnValue, "Emulated EEPROM Write failed \r\n");
-
-		/* Read contents of EEPROM after write. */
-		eepromReturnValue = Cy_Em_EEPROM_Read(LOGICAL_EEPROM_START,
-												eepromReadArray, LOGICAL_EEPROM_SIZE,
-												&Em_EEPROM_context);
-		HandleError(eepromReturnValue, "Emulated EEPROM Read failed \r\n" );
-
-#ifdef DEBUG_ENABLE
-		printf("after\r\n");
-		for(i = 0; i < LOGICAL_EEPROM_SIZE ; i++){
-			printf("%x ",eepromReadArray[i]);
-		}
-		printf("\r\n");
-#endif
-}
-
 static void getTimeFromServer()
 {
 	cy_rslt_t rslt;
@@ -1163,7 +914,7 @@ static void httpRequestResponse()
 	}
 
 	//get time by creating HTTP request
-	read_eeprom(devID,8);	//read device ID from EEPROM
+	readDeviceID((uint8_t*)&devID[0],8);	//read device ID from EEPROM
 	sprintf(req_body,"action=GET_ALL&DEVICE_ID=%s",devID);
 	rslt = get_http_response(handle,req_body,strlen(req_body),TRUE);
 	if(rslt != CY_RSLT_SUCCESS)
@@ -1176,69 +927,6 @@ static void httpRequestResponse()
 	if(rslt != CY_RSLT_SUCCESS)
 	{
 		printf("error delete_http_client\r\n");
-	}
-}
-
-static void getControlDetails()
-{
-	char tempEE[LOGICAL_EEPROM_SIZE];
-	int i = 0;
-	struct control_data_ee cd_ee;
-
-    memset(save_memory,0x00,LOGICAL_EEPROM_SIZE);	//reset JASON parser array before getting data
-    memset(save_response,0x00,LOGICAL_EEPROM_SIZE);
-
-    httpRequestResponse();
-
-	memcpy(save_memory,save_response,LOGICAL_EEPROM_SIZE);		//update save_memory array with response
-
-	//if parsing is success, then store the data to EEPROM, if failed, update the control details with
-	//whatever there in EEPROM
-	if(json_parser_snippet() == 0)
-	{
-#ifdef DEBUG_ENABLE
-		printf("json parsing pass\n");
-#endif
-		//save deadline time and control info to EEPROM
-		updateControlDetailsToEE();
-	}
-	else
-	{
-#ifdef DEBUG_ENABLE
-		printf("json parsing failed\n");
-#endif
-		//in case if the response is not proper from server, copy data from EEPROM and parse
-		memset(tempEE,0x00,LOGICAL_EEPROM_SIZE);
-		read_eeprom(tempEE,LOGICAL_EEPROM_SIZE);
-
-#ifdef DEBUG_ENABLE
-		for(i = 0; i < LOGICAL_EEPROM_SIZE ; i++){
-			printf("%x ",tempEE[i]);
-		}
-
-		printf("\r\n");
-#endif
-
-		memset((char*)&cd_ee,0x00,sizeof(cd_ee));
-		memcpy((char*)&cd_ee,&tempEE[CNDATA_EE_STORAGE_START],sizeof(cd_ee));
-
-		year = cd_ee.year;
-		month = cd_ee.month;
-		day = cd_ee.day;
-		hour = cd_ee.hour;
-		minute = cd_ee.minute;
-		control_status = cd_ee.control;
-
-#ifdef DEBUG_ENABLE
-		printf("ee_year %d\n",year);
-		printf("ee_month %d\n",month);
-		printf("ee_day %d\n",day);
-		printf("ee_hour %d\n",hour);
-		printf("ee_minute %d\n",minute);
-		printf("ee_control %d\n",control_status);
-		printf("\r\n");
-#endif
-
 	}
 }
 
@@ -1283,7 +971,66 @@ static void updateRelayState()
 	}
 }
 
+static void getControlDetails()
+{
+	struct control_data_ee cd_ee;
+
+    memset(save_response,0x00,LOGICAL_EEPROM_SIZE);
+    memset(save_memory,0x00,LOGICAL_EEPROM_SIZE);	//reset JASON parser array before getting data
+
+    httpRequestResponse();
+
+    memcpy(save_memory,save_response,LOGICAL_EEPROM_SIZE);		//update save_memory array with response
+	//if parsing is success, then store the data to EEPROM, if failed, update the control details with
+	//whatever there in EEPROM
+	if(json_parser_snippet() == 0)
+	{
+#ifdef DEBUG_ENABLE
+		printf("json parsing pass\n");
+#endif
+		//save details in eeprom
+		cd_ee.control = control_status;
+		cd_ee.year = year;
+		cd_ee.month = month;
+		cd_ee.day = day;
+		cd_ee.hour = hour;
+		cd_ee.minute = minute;
+
+		//save deadline time and control info to EEPROM
+		writeControlInfo((uint8_t*)&cd_ee,sizeof(cd_ee));
+		printEEPROMContent();
+	}
+	else
+	{
+#ifdef DEBUG_ENABLE
+		printf("json parsing failed\n");
+#endif
+		//in case if the response is not proper from server, copy data from EEPROM and parse
+		readControlInfo((uint8_t*)&cd_ee,sizeof(cd_ee));
+
+		year = cd_ee.year;
+		month = cd_ee.month;
+		day = cd_ee.day;
+		hour = cd_ee.hour;
+		minute = cd_ee.minute;
+		control_status = cd_ee.control;
+
+#ifdef DEBUG_ENABLE
+		printf("ee_year %d\n",year);
+		printf("ee_month %d\n",month);
+		printf("ee_day %d\n",day);
+		printf("ee_hour %d\n",hour);
+		printf("ee_minute %d\n",minute);
+		printf("ee_control %d\n",control_status);
+		printf("\r\n");
+#endif
+
+	}
+}
+
 void alarm_task(void *arg){
+
+	struct control_data_ee cd_ee;
 
     init_relay();	//initialize GPIO for relay control
 
@@ -1335,8 +1082,16 @@ void alarm_task(void *arg){
 			printf("updateControlDetailsToEE\n");
 #endif
 			updateEEPROM_flag = FALSE;
-			updateControlDetailsToEE();
+			//save details in eeprom
+			cd_ee.control = control_status;
+			cd_ee.year = year;
+			cd_ee.month = month;
+			cd_ee.day = day;
+			cd_ee.hour = hour;
+			cd_ee.minute = minute;
+			writeControlInfo((uint8_t*)&cd_ee,sizeof(cd_ee));
 			alarm_hit = FALSE;
+			printEEPROMContent();
 		}
 
 		update_inprog = FALSE;
@@ -1395,7 +1150,7 @@ void rtc_task(void *arg)
 					}
 
 					//get time by creating HTTP request
-					read_eeprom(devID,8);	//read device ID from EEPROM
+					readDeviceID((uint8_t*)devID,8);	//read device ID from EEPROM
 					sprintf(req_body,"action=UPDATE_CTRL&DEVICE_ID=%s&CONTROL=%s",devID,stat[1]);
 					rslt = get_http_response(handle,req_body,strlen(req_body),FALSE);
 					if(rslt != CY_RSLT_SUCCESS)
@@ -1419,42 +1174,3 @@ void rtc_task(void *arg)
 	}
 
 }
-
-void read_eeprom(char* id, uint8_t len)
-{
-	cy_en_em_eeprom_status_t eepromReturnValue;
-	/* Initialize the flash start address in EEPROM configuration structure. */
-#if ((defined(TARGET_CY8CKIT_064B0S2_4343W)||(defined(TARGET_CY8CPROTO_064B0S3))) && (USER_FLASH == FLASH_REGION_TO_USE ))
-	Em_EEPROM_config.userFlashStartAddr = (uint32_t) APP_DEFINED_EM_EEPROM_LOCATION_IN_FLASH;
-#else
-	Em_EEPROM_config.userFlashStartAddr = (uint32_t) EepromStorage;
-#endif
-
-	eepromReturnValue = Cy_Em_EEPROM_Init(&Em_EEPROM_config, &Em_EEPROM_context);
-	HandleError(eepromReturnValue, "Emulated EEPROM Initialization Error \r\n");
-
-	/* Read 15 bytes out of EEPROM memory. */
-	eepromReturnValue = Cy_Em_EEPROM_Read(LOGICAL_EEPROM_START, id, len, &Em_EEPROM_context);
-	HandleError(eepromReturnValue, "Emulated EEPROM Read failed \r\n");
-}
-
-#if 1	//write to EEPROM
-void write_ID(char* id, uint8_t len)
-{
-	cy_en_em_eeprom_status_t eepromReturnValue;
-		/* Initialize the flash start address in EEPROM configuration structure. */
-	#if ((defined(TARGET_CY8CKIT_064B0S2_4343W)||(defined(TARGET_CY8CPROTO_064B0S3))) && (USER_FLASH == FLASH_REGION_TO_USE ))
-		Em_EEPROM_config.userFlashStartAddr = (uint32_t) APP_DEFINED_EM_EEPROM_LOCATION_IN_FLASH;
-	#else
-		Em_EEPROM_config.userFlashStartAddr = (uint32_t) EepromStorage;
-	#endif
-
-		eepromReturnValue = Cy_Em_EEPROM_Init(&Em_EEPROM_config, &Em_EEPROM_context);
-		HandleError(eepromReturnValue, "Emulated EEPROM Initialization Error \r\n");
-
-		/* Write initial data to EEPROM. */
-		eepromReturnValue = Cy_Em_EEPROM_Write(LOGICAL_EEPROM_START, id, len,&Em_EEPROM_context);
-
-		HandleError(eepromReturnValue, "Emulated EEPROM Write failed \r\n");
-}
-#endif

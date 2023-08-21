@@ -74,6 +74,8 @@
 * Function Prototype
 ********************************************************************************/
 void flowmeter_logger(void *arg);
+void flow_eeprom(void* arg);
+void flow_cloud(void* arg);
 void gpio_interrupt_handler(void *handler_arg, cyhal_gpio_event_t event);
 
 
