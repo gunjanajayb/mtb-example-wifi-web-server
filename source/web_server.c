@@ -85,6 +85,7 @@
 #define EEPROM_TASK_STACK_SIZE        (5 * 1024)
 #define EEPROM_TASK_PRIORITY          (1)
 
+#define WIFI_PIN P13_4
 /* flowmeter_handle task handle. */
 TaskHandle_t flowmeter_handle;
 TaskHandle_t alarmtask_handle;
@@ -731,11 +732,11 @@ cy_rslt_t start_sta_mode()
         {
             APP_INFO(("Successfully connected to Wi-Fi network '%s'.\n", connect_param.ap_credentials.SSID));
             APP_INFO(("%d.%d.%d.%d\n",(uint8_t)ip_address.ip.v4,(uint8_t)(ip_address.ip.v4 >> 8),(uint8_t)(ip_address.ip.v4 >> 16),(uint8_t)(ip_address.ip.v4 >> 24)));
-            
+            cyhal_gpio_write(WIFI_PIN, CYBSP_LED_STATE_ON);
             break;
         }
         ERR_INFO(("Connection to Wi-Fi network failed with error code %d. Retrying in %d ms...\n", (int)result, WIFI_CONN_RETRY_INTERVAL_MSEC));
-
+        cyhal_gpio_write(WIFI_PIN, CYBSP_LED_STATE_OFF);
         vTaskDelay(pdMS_TO_TICKS(WIFI_CONN_RETRY_INTERVAL_MSEC));
     }
 

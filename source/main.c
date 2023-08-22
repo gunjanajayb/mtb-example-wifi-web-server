@@ -69,7 +69,7 @@
 /* RTOS related macros. */
 #define SERVER_TASK_STACK_SIZE        (10 * 1024)
 #define SERVER_TASK_PRIORITY          (1)
-
+#define WIFI_PIN P13_4
 /* RTOS related macros. */
 #define FLOWSENSE_TASK_STACK_SIZE        (4 * 1024)
 #define FLOWSENSE_TASK_PRIORITY          (1)
@@ -85,6 +85,7 @@ volatile int uxTopUsedPriority;
 TaskHandle_t server_task_handle;
 TaskHandle_t flowsens_task_handle;
 cyhal_gpio_callback_data_t gpio_btn_callback_data;
+cyhal_gpio_callback_data_t gpio_Power_Consumption_cbdata; // some diiferent name
 QueueHandle_t flow_eepromQ;
 QueueHandle_t flow_cloudQ;
 /*******************************************************************************
@@ -127,10 +128,24 @@ int main(void)
 	cyhal_gpio_enable_event(P13_5, CYHAL_GPIO_IRQ_RISE,
 								 GPIO_INTERRUPT_PRIORITY, true);
 
+	/* Initialize the Timer button for Power consumption*/
+	result = cyhal_gpio_init(P13_6, CYHAL_GPIO_DIR_INPUT,
+			CYBSP_USER_BTN_DRIVE, CYBSP_BTN_PRESSED);
+	/* User button init failed. Stop program execution */
+	CHECK_RESULT(result);
+
+	/* Configure GPIO interrupt */
+	gpio_Power_Consumption_cbdata.callback = gpio_Power_Consumption_interrupt; // some different name
+	cyhal_gpio_register_callback(P13_6,
+								&gpio_Power_Consumption_cbdata);
+	cyhal_gpio_enable_event(P13_6, CYHAL_GPIO_IRQ_RISE,
+								GPIO_INTERRUPT_PRIORITY, true);
+
     /* Initialize retarget-io to use the debug UART port */
-    cy_retarget_io_init(CYBSP_DEBUG_UART_TX, CYBSP_DEBUG_UART_RX, CY_RETARGET_IO_BAUDRATE);
+	cy_retarget_io_init(CYBSP_DEBUG_UART_TX, CYBSP_DEBUG_UART_RX, CY_RETARGET_IO_BAUDRATE);
 
 	initEEPROM();
+	result = cyhal_gpio_init(WIFI_PIN, CYHAL_GPIO_DIR_OUTPUT, CYHAL_GPIO_DRIVE_STRONG, CYBSP_LED_STATE_OFF);
 
     /* Enable global interrupts */
     __enable_irq();

@@ -95,6 +95,7 @@
 #else
 #define RELAY_PIN P12_0
 #endif
+#define WIFI_PIN P13_4
 /*******************************************************************************
  * Function Prototypes
  ******************************************************************************/
@@ -265,12 +266,15 @@ int year = 0, month = 0, day = 0, hour = 0, minute = 0, sec = 0;
 int sYear = 0, sMonth = 0, sDay = 0, sHour = 0, sMinute =0, sSec = 0;
 int current_day=0, current_month=0, current_year=0, current_sec=0, current_min=0, current_hour=0;
 uint8_t control_status = 0;
+uint8_t flow_reset = 0;
 
 bool updateEEPROM_flag = FALSE;
 bool control_flag = FALSE;
 bool booting = TRUE;
 bool update_inprog = FALSE;
 bool alarm_hit = FALSE;
+
+extern QueueHandle_t flow_eepromQ;
 
 struct control_data_ee{
 	uint16_t	year;
@@ -420,6 +424,7 @@ static cy_rslt_t parse_json_snippet_callback (cy_JSON_object_t* json_object, voi
 	int lhour = 0;
 	int lminute = 0;
 	char lcntrl[4] = {0};
+	char lfReset[8] = {0};
 	uint8_t lcntrl_stat = 0;
 
 	switch(json_object->value_type)
@@ -523,6 +528,20 @@ static cy_rslt_t parse_json_snippet_callback (cy_JSON_object_t* json_object, voi
 					}
 				}
 			}
+
+			if((strncmp(json_object->object_string, "isFlowReset", strlen("isFlowReset")) == 0))
+			{
+				strncpy(lfReset,json_object->value,4);
+				if(strncmp (lfReset, "TRUE" , strlen("TRUE")) == 0)
+				{
+					flow_reset = 1;
+				}
+				else
+				{
+					flow_reset = 0;
+				}
+
+			}
 			break;
 		}
 		case JSON_NUMBER_TYPE:
@@ -625,8 +644,7 @@ void init_relay()
 
     }
 }
-
-static void init_RTC(struct tm *date_time)
+void init_RTC(struct tm *date_time)
 {
 	cy_rslt_t rslt;
 	char buffer[STRING_BUFFER_SIZE];
@@ -732,10 +750,11 @@ static cy_rslt_t get_http_response(cy_http_client_t handle, char* req_body, int 
 	if( res != CY_RSLT_SUCCESS )
 	{
 		printf("HTTP Client Connection Failed!\n");
+		cyhal_gpio_write(WIFI_PIN, CYBSP_LED_STATE_OFF);
 
 	}else{
 		printf("\nConnected to HTTP Server Successfully getht %d\n\n",isSave);
-
+		cyhal_gpio_write(WIFI_PIN, CYBSP_LED_STATE_ON);
 	}
 
 	request.buffer = userBuffer;
@@ -974,6 +993,7 @@ static void updateRelayState()
 static void getControlDetails()
 {
 	struct control_data_ee cd_ee;
+	float flowrate = 0.0;
 
     memset(save_response,0x00,LOGICAL_EEPROM_SIZE);
     memset(save_memory,0x00,LOGICAL_EEPROM_SIZE);	//reset JASON parser array before getting data
@@ -995,6 +1015,13 @@ static void getControlDetails()
 		cd_ee.day = day;
 		cd_ee.hour = hour;
 		cd_ee.minute = minute;
+
+		if(flow_reset == 1)
+		{
+			flow_reset = 0;
+			flowrate = 0.0;
+			xQueueSendToBack(flow_eepromQ,(const void*)&flowrate,pdMS_TO_TICKS(200));
+		}
 
 		//save deadline time and control info to EEPROM
 		writeControlInfo((uint8_t*)&cd_ee,sizeof(cd_ee));
@@ -1031,6 +1058,7 @@ static void getControlDetails()
 void alarm_task(void *arg){
 
 	struct control_data_ee cd_ee;
+	float flowrate = 0.0;
 
     init_relay();	//initialize GPIO for relay control
 
@@ -1075,6 +1103,13 @@ void alarm_task(void *arg){
 		memcpy(save_memory,save_response,LOGICAL_EEPROM_SIZE);		//update save_memory array with response
 
 		json_parser_snippet();
+
+		if(flow_reset == 1)
+		{
+			flow_reset = 0;
+			flowrate = 0.0;
+			xQueueSendToBack(flow_eepromQ,(const void*)&flowrate,pdMS_TO_TICKS(200));
+		}
 
 		if(updateEEPROM_flag == TRUE)
 		{

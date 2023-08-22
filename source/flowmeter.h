@@ -77,6 +77,7 @@ void flowmeter_logger(void *arg);
 void flow_eeprom(void* arg);
 void flow_cloud(void* arg);
 void gpio_interrupt_handler(void *handler_arg, cyhal_gpio_event_t event);
+void gpio_Power_Consumption_interrupt(void *handler_arg, cyhal_gpio_event_t event);
 
 
 #endif /* FLOWMETER_H_ */

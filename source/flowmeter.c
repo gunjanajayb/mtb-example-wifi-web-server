@@ -81,7 +81,8 @@
 #else
 #define RELAY_PIN P12_0
 #endif
-
+#define WIFI_PIN P13_4
+#define TIMER_PIN P13_6
 /*******************************************************************************
 * Function Prototypes
 ********************************************************************************/
@@ -98,7 +99,8 @@ volatile int counterpulse_curr = 0;
 volatile int counterpulse_diff = 0;
 extern QueueHandle_t flow_eepromQ;
 extern QueueHandle_t flow_cloudQ;
-
+struct tm start_time;
+struct tm end_time;
 /*******************************************************************************
  * Function Name: http_client_task
  *******************************************************************************
@@ -173,6 +175,7 @@ static cy_rslt_t log_flowrate(cy_http_client_t handle, char* str_flowrate, uint3
 	{
 #ifdef DEBUG_ENABLE
 		printf("HTTP Client Connection Failed!\n");
+		cyhal_gpio_write(WIFI_PIN, CYBSP_LED_STATE_OFF);
 #endif		
 		return res;
 	}
@@ -180,6 +183,7 @@ static cy_rslt_t log_flowrate(cy_http_client_t handle, char* str_flowrate, uint3
 	{
 #ifdef DEBUG_ENABLE
 		printf("\nConnected to HTTP Server Successfully logflow\n\n");
+		cyhal_gpio_write(WIFI_PIN, CYBSP_LED_STATE_ON);
 #endif
 	}
 
@@ -277,7 +281,8 @@ void flowmeter_logger(void *arg){
 	char device_id[10] = {0};
 	int counter = 0;
 	uint8_t* ptr;
-
+	char bufferS[80];
+	char bufferE[80];
 	//read device ID from EEPROM
 	readDeviceID((uint8_t*)&device_id[0],8);
 
@@ -300,7 +305,14 @@ void flowmeter_logger(void *arg){
 		// Poll the flowmeter once a second
 		cyhal_system_delay_ms(1000);
 
-		adc_out = (float)(counterpulse_curr)/ (float)73 ;
+		readFlowData((uint8_t*)&flowrate,sizeof(float));
+		ptr=(uint8_t*)&flowrate;
+		if(*ptr == 0xFF &&  *(ptr+1) == 0xFF && *(ptr+2) == 0xFF && *(ptr+3) == 0xFF)
+		{
+			flowrate = 0.0;
+		}
+
+		adc_out = (float)(counterpulse_curr)/ (float)35 ;
 		counterpulse_curr = 0;
 		
 		newflowrate =  adc_out/60;
@@ -317,6 +329,13 @@ void flowmeter_logger(void *arg){
 		{
 			counter = 0;
 			xQueueSendToBack(flow_cloudQ,(const void*)&flowrate,pdMS_TO_TICKS(200));
+
+			printf("RTC_start:\r\n");
+			strftime(bufferS, sizeof(bufferS), "%c", &start_time);
+			printf("\r%s\n\n", bufferS);
+			printf("RTC_end:\r\n");
+			strftime(bufferE, sizeof(bufferE), "%c", &end_time);
+			printf("\r%s\n\n", bufferE);
 		}
 	}
 }
@@ -343,7 +362,18 @@ void gpio_interrupt_handler(void *handler_arg, cyhal_gpio_event_t event)
 {
 	counterpulse_curr++;
 }
+void gpio_Power_Consumption_interrupt(void *handler_arg, cyhal_gpio_event_t event)
+{
 
+	if(cyhal_gpio_read(TIMER_PIN) == 1)
+	{
+	init_RTC(&start_time);
+	}
+	else
+	{
+	init_RTC(&end_time);
+	}
+}
 void flow_cloud(void* arg){
 	char eventValue[256];
 	cy_rslt_t res = CY_RSLT_SUCCESS;
@@ -366,6 +396,7 @@ void flow_cloud(void* arg){
 		res = CY_RSLT_SUCCESS;
 
 		gpiostate = cyhal_gpio_read(RELAY_PIN);
+
 
 #ifdef DEBUG_ENABLE
 printf("sending flowrate: %f.\n", flowrate);

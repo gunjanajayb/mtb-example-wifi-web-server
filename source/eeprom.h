@@ -17,4 +17,7 @@ void readPWD(uint8_t* buffer, uint8_t size);
 void writePWD(uint8_t* buffer, uint8_t size);
 void readDeviceID(uint8_t* buffer, uint8_t size);
 void writeDeviceID(uint8_t* buffer, uint8_t size);
+void readFlowData(uint8_t* buffer, uint8_t size);
+void writeFlowData(uint8_t* buffer, uint8_t size);
+void printEEPROMContent();
 #endif /* SOURCE_EEPROM_H_ */
