@@ -529,9 +529,13 @@ static cy_rslt_t parse_json_snippet_callback (cy_JSON_object_t* json_object, voi
 				}
 			}
 
-			if((strncmp(json_object->object_string, "isFlowReset", strlen("isFlowReset")) == 0))
+			if((strncmp(json_object->object_string, "flowrate_reset", strlen("flowrate_reset")) == 0))
 			{
 				strncpy(lfReset,json_object->value,4);
+#if DEBUG_ENABLE
+				printf("flowrate_reset %s\n",lfReset);
+				printf("\r\n");
+#endif
 				if(strncmp (lfReset, "TRUE" , strlen("TRUE")) == 0)
 				{
 					flow_reset = 1;

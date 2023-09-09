@@ -73,7 +73,6 @@
 /* RTOS related macros. */
 #define FLOWSENSE_TASK_STACK_SIZE        (4 * 1024)
 #define FLOWSENSE_TASK_PRIORITY          (1)
-
 #define FLOW_QUEUE_SIZE				10
 /*******************************************************************************
 * Global Variables

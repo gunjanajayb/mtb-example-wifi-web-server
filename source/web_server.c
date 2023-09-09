@@ -153,7 +153,7 @@ cy_http_server_t http_sta_server;
 uint8_t wifi_ssid[WIFI_SSID_LEN] = {0};
 
 /*Buffer to store Password*/
-uint8_t wifi_pwd[WIFI_PWD_LEN] = {0}; 
+uint8_t wifi_pwd[WIFI_PWD_LEN] = {0};
 
 /*Buffer to store HTTP data*/
 char buffer[BUFFER_LENGTH] = {0};
@@ -521,6 +521,12 @@ cy_rslt_t wifi_extract_credentials(const uint8_t *data, uint32_t data_len, cy_ht
     int8_t ssid_buff_index, buff_index = 0;
     cy_rslt_t result = CY_RSLT_SUCCESS;
     char *response = http_wifi_connect_response;
+    /*local Buffer to store SSID*/
+    uint8_t wifi_ssid_l[WIFI_SSID_LEN] = {0};
+    /*local Buffer to store Password*/
+    uint8_t wifi_pwd_l[WIFI_PWD_LEN] = {0};
+    uint8_t cred_inx = 0;
+    uint8_t retry = 0;
 
 #ifdef ENABLE_TFT
     char display_buffer[DISPLAY_BUFFER_LENGTH] = {0};
@@ -532,8 +538,8 @@ cy_rslt_t wifi_extract_credentials(const uint8_t *data, uint32_t data_len, cy_ht
     if (!strncmp("SSID", buffer, 4))
     {
         //reset the array before storing new details
-        memset(wifi_ssid,0x00,WIFI_SSID_LEN);
-        memset(wifi_pwd,0x00,WIFI_PWD_LEN);
+        memset(wifi_ssid_l,0x00,WIFI_SSID_LEN);
+        memset(wifi_pwd_l,0x00,WIFI_PWD_LEN);
 
         /* Extract SSID and Password - skip to SSID*/
         while ((buffer[buff_index++] != EQUALS_OPERATOR_ASCII_VALUE))
@@ -542,7 +548,7 @@ cy_rslt_t wifi_extract_credentials(const uint8_t *data, uint32_t data_len, cy_ht
         ssid_buff_index = 0;
         /*skip '&' */
         while ((buffer[buff_index] != AMPERSAND_OPERATOR_ASCII_VALUE))
-            wifi_ssid[ssid_buff_index++] = buffer[buff_index++];
+        	wifi_ssid_l[ssid_buff_index++] = buffer[buff_index++];
 
         buff_index++;
         /* skip to Password */
@@ -555,7 +561,7 @@ cy_rslt_t wifi_extract_credentials(const uint8_t *data, uint32_t data_len, cy_ht
             if (buffer[buff_index] == AMPERSAND_OPERATOR_ASCII_VALUE)
                 break;
 
-            wifi_pwd[ssid_buff_index++] = buffer[buff_index++];
+            wifi_pwd_l[ssid_buff_index++] = buffer[buff_index++];
         }
     }
     result = cy_http_server_response_stream_write_payload(stream, WIFI_CONNECT_IN_PROGRESS, sizeof(WIFI_CONNECT_IN_PROGRESS));
@@ -565,19 +571,58 @@ cy_rslt_t wifi_extract_credentials(const uint8_t *data, uint32_t data_len, cy_ht
     }
 
     printf("Hello\r\n");
-    printf("%s\r\n",wifi_ssid);
-    printf("%s\r\n",wifi_pwd);
+    printf("%s\r\n",wifi_ssid_l);
+    printf("%s\r\n",wifi_pwd_l);
 
-    writeSSID(wifi_ssid,WIFI_SSID_LEN);
-	writePWD(wifi_pwd,WIFI_PWD_LEN);
+    //read crendetial index first and then store. Later increment index to next one
+    readCredentialIndex(&cred_inx,1);
+    if(cred_inx > 2)	//this will be the first time entering credentials
+    	cred_inx = 0;
+
+    writeSSID(wifi_ssid_l,WIFI_SSID_LEN,cred_inx);
+	writePWD(wifi_pwd_l,WIFI_PWD_LEN,cred_inx);
+	//if stored on 2nd location, then next should go back to 0th location
+	if(cred_inx >= 2)
+		cred_inx = 0;
+	else
+		cred_inx++;
+
+	//update next cred location
+	writeCredentialIndex(&cred_inx,1);
 
 	printEEPROMContent();
+	memcpy(wifi_ssid,wifi_ssid_l,WIFI_SSID_LEN);
+	memcpy(wifi_pwd,wifi_pwd_l,WIFI_PWD_LEN);
 
     result = start_sta_mode();
 
+    //if still not success, then retry other stored credentials and connect
+    if(result != CY_RSLT_SUCCESS)
+    {
+    	retry = 0;
+		while(retry < 3)
+		{
+			memset(wifi_ssid,0x00,WIFI_SSID_LEN);
+			memset(wifi_pwd,0x00,WIFI_PWD_LEN);
+			readSSID(wifi_ssid,WIFI_SSID_LEN,retry);
+			readPWD(wifi_pwd,WIFI_PWD_LEN,retry);
+
+			if(wifi_ssid[0] != 0xFF)	//if there is already credentials loaded from EEPROM, then use it and connect
+			{
+				result = start_sta_mode();
+			}
+
+			if (result == CY_RSLT_SUCCESS)
+			{
+				break;
+			}
+			retry++;
+		}
+    }
+
     printf("============================================================\n");
-         	printf("ModusToolbox-Level3-WiFi - 4B: POST to httpbin.org\n");
-        	printf("============================================================\n\n");
+    printf("ModusToolbox-Level3-WiFi - 4B: POST to httpbin.org\n");
+    printf("============================================================\n\n");
 
 
     if(taskCreated == false)
@@ -987,6 +1032,7 @@ void url_decode(char *dst, const uint8_t *src)
 void server_task(void *arg)
 {
     cy_rslt_t result = CY_RSLT_SUCCESS;
+    uint8_t retry = 0;
     (void)arg;
 
 #ifdef ENABLE_TFT
@@ -1025,40 +1071,52 @@ void server_task(void *arg)
 
     display_configuration();
     
-    readSSID(wifi_ssid,WIFI_SSID_LEN);
-    readPWD(wifi_pwd,WIFI_PWD_LEN);
+    retry = 0;
+    while(retry < 3)
+    {
+    	memset(wifi_ssid,0x00,WIFI_SSID_LEN);
+    	memset(wifi_pwd,0x00,WIFI_PWD_LEN);
+    	readSSID(wifi_ssid,WIFI_SSID_LEN,retry);
+    	readPWD(wifi_pwd,WIFI_PWD_LEN,retry);
+
+    	if(wifi_ssid[0] != 0xFF)	//if there is already credentials loaded from EEPROM, then use it and connect
+    	{
+    		result = start_sta_mode();
+    	}
+
+    	if (result == CY_RSLT_SUCCESS)
+    	{
+    		break;
+    	}
+    	retry++;
+    }
 
     printf("server Task\r\n");
     printEEPROMContent();
 
-    if(wifi_ssid[0] != 0xFF)	//if there is already credentials loaded from EEPROM, then use it and connect
+    if(taskCreated == false)
     {
-    	result = start_sta_mode();
+    	if(xTaskCreate(flowmeter_logger, "flowlogger_task", HTTP_CLIENT_TASK_STACK_SIZE, NULL, HTTP_CLIENT_TASK_PRIORITY, &flowmeter_handle) == pdFAIL)
+    	{
+    		printf("Task flowlogger_task create failed\r\n");
+    	}
 
-        if(taskCreated == false)
-        {
-        	if(xTaskCreate(flowmeter_logger, "flowlogger_task", HTTP_CLIENT_TASK_STACK_SIZE, NULL, HTTP_CLIENT_TASK_PRIORITY, &flowmeter_handle) == pdFAIL)
-        	{
-        		printf("Task flowlogger_task create failed\r\n");
-        	}
+    	if(xTaskCreate(alarm_task, "alarm_task", HTTP_CLIENT_TASK_STACK_SIZE, NULL, HTTP_CLIENT_TASK_PRIORITY, &alarmtask_handle) == pdFAIL)
+    	{
+    		printf("Task alarm_task create failed\r\n");
+    	}
 
-        	if(xTaskCreate(alarm_task, "alarm_task", HTTP_CLIENT_TASK_STACK_SIZE, NULL, HTTP_CLIENT_TASK_PRIORITY, &alarmtask_handle) == pdFAIL)
-        	{
-        		printf("Task alarm_task create failed\r\n");
-        	}
+    	if(xTaskCreate(flow_eeprom, "flow_eeprom", EEPROM_TASK_STACK_SIZE, NULL, EEPROM_TASK_PRIORITY, &floweeprom_handle) == pdFAIL)
+    	{
+    		printf("Task flow_eeprom create failed\r\n");
+    	}
 
-        	if(xTaskCreate(flow_eeprom, "flow_eeprom", EEPROM_TASK_STACK_SIZE, NULL, EEPROM_TASK_PRIORITY, &floweeprom_handle) == pdFAIL)
-        	{
-        		printf("Task flow_eeprom create failed\r\n");
-        	}
+    	if(xTaskCreate(flow_cloud, "flow_cloud", EEPROM_TASK_STACK_SIZE, NULL, EEPROM_TASK_PRIORITY, &flowcloud_handle) == pdFAIL)
+    	{
+    		printf("Task flow_cloud create failed\r\n");
+    	}
 
-        	if(xTaskCreate(flow_cloud, "flow_cloud", EEPROM_TASK_STACK_SIZE, NULL, EEPROM_TASK_PRIORITY, &flowcloud_handle) == pdFAIL)
-        	{
-        		printf("Task flow_cloud create failed\r\n");
-        	}
-
-        	taskCreated = true;
-        }
+    	taskCreated = true;
     }
 
     /* Waits for queue message to register a new HTTP page resource.*/

@@ -22,10 +22,9 @@
 #define EEPROM_BLOCK_SIZE		(256UL)
 
 #define DEVICE_ID_LOCATION		(0UL)
-#define WIFI_SSID_LOCATION		(8UL)
-#define WIFI_PWD_LOCATION		(40UL)
 #define CONTROL_INFO_LOCATION	(104UL)
 #define FLORATE_LOCATION		(116UL)
+#define WIFI_CRED_NUMBER_LOC	(120UL)
 
 #define WRITE_DELAY		(1000UL)
 
@@ -34,6 +33,8 @@
 *******************************************************************************/
 cyhal_i2c_t mI2C;
 cyhal_i2c_cfg_t mI2C_cfg;
+uint32_t wifi_ssid_loc[3] = {8,EEPROM_BLOCK_SIZE,(2*EEPROM_BLOCK_SIZE)};
+uint32_t wifi_pwd_loc[3] = {40, 32 + EEPROM_BLOCK_SIZE, 32 + (2*EEPROM_BLOCK_SIZE)};
 
 /*******************************************************************************
 * Function Prototypes
@@ -87,7 +88,7 @@ void initEEPROM(void)
     printf("I2C_init Done\r\n\n");
 }
 
-static cy_rslt_t readEEPROMsection(uint8_t* buffer,uint8_t size,uint8_t location)
+static cy_rslt_t readEEPROMsection(uint8_t* buffer,uint8_t size,uint32_t location)
 {
 	cy_rslt_t result;
 	uint8_t slave_Addr = 0x50 | (uint8_t)(location / EEPROM_BLOCK_SIZE);
@@ -103,7 +104,7 @@ static cy_rslt_t readEEPROMsection(uint8_t* buffer,uint8_t size,uint8_t location
 	return result;
 }
 
-static cy_rslt_t writeEEPROMsection(uint8_t* buffer,uint8_t size,uint8_t location)
+static cy_rslt_t writeEEPROMsection(uint8_t* buffer,uint8_t size,uint32_t location)
 {
 	uint8_t slave_Addr = 0x50 | (uint8_t)(location / EEPROM_BLOCK_SIZE);
 	uint8_t off_location = location % EEPROM_BLOCK_SIZE ;
@@ -153,12 +154,13 @@ static cy_rslt_t writeEEPROMsection(uint8_t* buffer,uint8_t size,uint8_t locatio
 
 void printEEPROMContent()
 {
+
 	uint8_t i = 0;
 	uint8_t j = 0;
 	uint8_t buf[16] = {0};
 
 	printf("\r\n");
-	for(i=0;i<16;i++)
+	for(i=0;i< (3*16);i++)
 	{
 		readEEPROMsection(buf,16,(i * 16));
 		printf("read page %d:",i);
@@ -168,6 +170,7 @@ void printEEPROMContent()
 		}
 		printf("\r\n");
 	}
+
 }
 
 void readControlInfo(uint8_t* buffer,uint8_t size)
@@ -187,12 +190,12 @@ void writeControlInfo(uint8_t* buffer,uint8_t size)
 	writeEEPROMsection(buffer,size,CONTROL_INFO_LOCATION);
 }
 
-void readSSID(uint8_t* buffer, uint8_t size)
+void readSSID(uint8_t* buffer, uint8_t size,uint8_t inx)
 {
-	readEEPROMsection(buffer,size,WIFI_SSID_LOCATION);
+	readEEPROMsection(buffer,size,wifi_ssid_loc[inx]);
 }
 
-void writeSSID(uint8_t* buffer, uint8_t size)
+void writeSSID(uint8_t* buffer, uint8_t size,uint8_t inx)
 {
 	int i = 0;
 	printf("writeSSID %d\r\n",size);
@@ -201,15 +204,15 @@ void writeSSID(uint8_t* buffer, uint8_t size)
 		printf("%X ",buffer[i]);
 	}
 	printf("\r\n");
-	writeEEPROMsection(buffer,size,WIFI_SSID_LOCATION);
+	writeEEPROMsection(buffer,size,wifi_ssid_loc[inx]);
 }
 
-void readPWD(uint8_t* buffer, uint8_t size)
+void readPWD(uint8_t* buffer, uint8_t size,uint8_t inx)
 {
-	readEEPROMsection(buffer,size,WIFI_PWD_LOCATION);
+	readEEPROMsection(buffer,size,wifi_pwd_loc[inx]);
 }
 
-void writePWD(uint8_t* buffer, uint8_t size)
+void writePWD(uint8_t* buffer, uint8_t size,uint8_t inx)
 {
 	int i = 0;
 	printf("writePWD %d\r\n",size);
@@ -218,7 +221,7 @@ void writePWD(uint8_t* buffer, uint8_t size)
 		printf("%X ",buffer[i]);
 	}
 	printf("\r\n");
-	writeEEPROMsection(buffer,size,WIFI_PWD_LOCATION);
+	writeEEPROMsection(buffer,size,wifi_pwd_loc[inx]);
 }
 
 void readDeviceID(uint8_t* buffer, uint8_t size)
@@ -254,3 +257,21 @@ void writeFlowData(uint8_t* buffer, uint8_t size)
 	printf("\r\n");
 	writeEEPROMsection(buffer,size,FLORATE_LOCATION);
 }
+
+void readCredentialIndex(uint8_t* buffer, uint8_t size)
+{
+	readEEPROMsection(buffer,size,WIFI_CRED_NUMBER_LOC);
+}
+
+void writeCredentialIndex(uint8_t* buffer, uint8_t size)
+{
+	int i = 0;
+	printf("writeCredentialIndex %d\r\n",size);
+	for(i=0;i<size;i++)
+	{
+		printf("%X ",buffer[i]);
+	}
+	printf("\r\n");
+	writeEEPROMsection(buffer,size,WIFI_CRED_NUMBER_LOC);
+}
+

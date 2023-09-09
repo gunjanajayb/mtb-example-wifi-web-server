@@ -63,7 +63,7 @@
 #define MAX_WIFI_CONN_RETRIES             (10u)
 
 /* Wi-Fi re-connection time interval in milliseconds */
-#define WIFI_CONN_RETRY_INTERVAL_MSEC     (1000)
+#define WIFI_CONN_RETRY_INTERVAL_MSEC     (100u)
 
 #define MAKE_IPV4_ADDRESS(a, b, c, d)     ((((uint32_t) d) << 24) | \
                                           (((uint32_t) c) << 16) | \
